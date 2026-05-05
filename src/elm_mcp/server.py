@@ -12,8 +12,8 @@ import elmclient.rdfxml as rdfxml
 
 mcp = FastMCP("elm", instructions="IBM ELM (ALM Dataprev)")
 
-JAZZ_HOST = "https://alm.dataprev.gov.br"
-CRED_FILE = os.path.expanduser("~/.elm_creds.json")
+JAZZ_HOST = os.environ.get("ELM_HOST", "https://alm.dataprev.gov.br")
+CRED_FILE = os.path.expanduser(os.environ.get("ELM_CREDS_FILE", "~/.elm_creds.json"))
 
 PREFIXES = {
     "http://purl.org/dc/terms/": "dcterms",
@@ -41,10 +41,16 @@ _connections: dict = {}
 
 
 def _load_creds() -> tuple[str, str]:
+    # Prefer env vars over file
+    username = os.environ.get("ELM_USERNAME")
+    password = os.environ.get("ELM_PASSWORD")
+    if username and password:
+        return username, password
+
     if not os.path.exists(CRED_FILE):
         raise RuntimeError(
-            f"Credenciais não encontradas em {CRED_FILE}. "
-            "Rode primeiro: python test_connection.py"
+            f"Credenciais não encontradas. Configure ELM_USERNAME/ELM_PASSWORD "
+            f"ou crie {CRED_FILE}"
         )
     with open(CRED_FILE) as f:
         data = json.load(f)
