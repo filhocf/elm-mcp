@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "elm-mcp"
+version = "0.1.0"
+description = "MCP Server for IBM ELM (Engineering Lifecycle Management)"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    { name = "Claudio Ferreira Filho", email = "filhocf@gmail.com" }
+]
+requires-python = ">=3.11"
+keywords = ["mcp", "elm", "ibm", "alm", "jazz", "oslc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "mcp[cli]>=1.9.0",
+    "elmclient>=0.37.0",
+]
+
+[project.scripts]
+elm-mcp = "elm_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/filhocf/elm-mcp"
+Source = "https://github.com/filhocf/elm-mcp"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/elm_mcp"]
