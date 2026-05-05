@@ -41,11 +41,16 @@ _connections: dict = {}
 
 
 def _load_creds() -> tuple[str, str]:
-    # Prefer env vars over file
+    # Prefer env vars over file (both must be set)
     username = os.environ.get("ELM_USERNAME")
     password = os.environ.get("ELM_PASSWORD")
     if username and password:
         return username, password
+    if username or password:
+        raise RuntimeError(
+            "Both ELM_USERNAME and ELM_PASSWORD must be set together. "
+            "Only one was provided."
+        )
 
     if not os.path.exists(CRED_FILE):
         raise RuntimeError(
