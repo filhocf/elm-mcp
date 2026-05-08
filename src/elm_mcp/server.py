@@ -199,13 +199,76 @@ def get_workitem(
     return json.dumps(clean, ensure_ascii=False, indent=2)
 
 
-if __name__ == "__main__":
-    mcp.run()
+@mcp.tool()
+def list_requirements(
+    project_name: str = "MEU IMOVEL RURAL (MIR)",
+    max_results: int = 100,
+) -> str:
+    """Lista requisitos de um projeto DOORS Next (RM).
+    project_name: nome do projeto no DOORS Next
+    max_results: máximo de resultados (default 100)
+    """
+    app = _get_app("rm")
+    project = app.find_project(project_name)
+    if not project:
+        return json.dumps({"error": f"Projeto '{project_name}' não encontrado no RM"})
+
+    # Fix: set configuration context for CM-enabled projects
+    project.load_components_and_configurations()
+    configs = project.list_configs()
+    if configs:
+        config = project.find_config(configs[0])
+        project.set_local_config(config)
+
+    # Get query capability for Requirements
+    qcuris = project.get_query_capability_uris()
+    req_qc = None
+    if isinstance(qcuris, dict):
+        req_qc = qcuris.get("http://open-services.net/ns/rm#Requirement")
+    if not req_qc:
+        return json.dumps({"error": "Query capability para Requirement não encontrada"})
+
+    # Execute OSLC query — with select, returns dict {uri: {attr: value}}
+    dcterms_uri = rdfxml.RDF_DEFAULT_PREFIX.get("dcterms", "http://purl.org/dc/terms/")
+    results = project.execute_oslc_query(
+        req_qc,
+        select=["dcterms:title", "dcterms:identifier"],
+        prefixes={dcterms_uri: "dcterms"},
+        pagesize=200,
+        maxresults=max_results,
+    )
+
+    # Extract artifacts directly from query results (no individual GETs needed)
+    artifacts = []
+    items = results.items() if isinstance(results, dict) else [(uri, {}) for uri in results]
+    for uri, attrs in items:
+        if not isinstance(uri, str):
+            continue
+        title = _safe_str(attrs.get("dcterms:title", "")) if isinstance(attrs, dict) else ""
+        identifier = attrs.get("dcterms:identifier", "") if isinstance(attrs, dict) else ""
+        if not title:
+            continue
+        res_id = uri.split("/")[-1]
+        prefix = res_id.split("_")[0] if "_" in res_id else "?"
+        art_type = {"TX": "Text", "WR": "Requirement", "DM": "Module"}.get(prefix, prefix)
+        artifacts.append({
+            "id": identifier,
+            "title": title[:200],
+            "type": art_type,
+            "uri": uri,
+        })
+
+    return json.dumps({
+        "project": project_name,
+        "total": len(artifacts),
+        "artifacts": artifacts,
+    }, ensure_ascii=False, indent=2)
 
 
 def main():
     """Entry point for elm-mcp CLI."""
     mcp.run()
+
 
 if __name__ == "__main__":
     main()
