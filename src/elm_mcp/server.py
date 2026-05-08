@@ -199,13 +199,90 @@ def get_workitem(
     return json.dumps(clean, ensure_ascii=False, indent=2)
 
 
-if __name__ == "__main__":
-    mcp.run()
+@mcp.tool()
+def list_requirements(
+    project_name: str = "MEU IMOVEL RURAL (MIR)",
+    max_results: int = 100,
+) -> str:
+    """Lista requisitos de um projeto DOORS Next (RM).
+    project_name: nome do projeto no DOORS Next
+    max_results: máximo de resultados (default 100)
+    """
+    import xml.etree.ElementTree as ET
+
+    app = _get_app("rm")
+    project = app.find_project(project_name)
+    if not project:
+        return json.dumps({"error": f"Projeto '{project_name}' não encontrado no RM"})
+
+    # Fix: set configuration context for CM-enabled projects
+    project.load_components_and_configurations()
+    configs = project.list_configs()
+    if configs:
+        config = project.find_config(configs[0])
+        project.set_local_config(config)
+
+    # Get query capability for Requirements
+    qcuris = project.get_query_capability_uris()
+    req_qc = None
+    if isinstance(qcuris, dict):
+        req_qc = qcuris.get("http://open-services.net/ns/rm#Requirement")
+    if not req_qc:
+        return json.dumps({"error": "Query capability para Requirement não encontrada"})
+
+    # Execute OSLC query
+    dcterms_uri = rdfxml.RDF_DEFAULT_PREFIX.get("dcterms", "http://purl.org/dc/terms/")
+    results = project.execute_oslc_query(
+        req_qc,
+        select=["dcterms:title", "dcterms:identifier"],
+        prefixes={dcterms_uri: "dcterms"},
+        pagesize=200,
+        maxresults=max_results,
+    )
+
+    # Resolve each URI to get title and identifier
+    artifacts = []
+    for uri in results:
+        if not isinstance(uri, str):
+            continue
+        try:
+            resp = project.execute_get_raw(uri)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.text)
+            title = ""
+            identifier = ""
+            for elem in root.iter():
+                if elem.tag == "{http://purl.org/dc/terms/}title" and elem.text:
+                    title = _safe_str(elem.text)
+                elif elem.tag == "{http://purl.org/dc/terms/}identifier" and elem.text:
+                    identifier = elem.text
+            if title:
+                # Determine type from URI pattern
+                res_id = uri.split("/")[-1]
+                prefix = res_id.split("_")[0] if "_" in res_id else "?"
+                art_type = {"TX": "Text", "WR": "Requirement", "DM": "Module"}.get(prefix, prefix)
+                artifacts.append({
+                    "id": identifier,
+                    "title": title[:200],
+                    "type": art_type,
+                    "uri": uri,
+                })
+        except Exception:
+            continue
+
+    return json.dumps({
+        "project": project_name,
+        "total_uris": len(results),
+        "resolved": len(artifacts),
+        "artifacts": artifacts,
+    }, ensure_ascii=False, indent=2)
 
 
 def main():
     """Entry point for elm-mcp CLI."""
     mcp.run()
+
 
 if __name__ == "__main__":
     main()
