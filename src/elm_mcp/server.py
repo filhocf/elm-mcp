@@ -208,8 +208,6 @@ def list_requirements(
     project_name: nome do projeto no DOORS Next
     max_results: máximo de resultados (default 100)
     """
-    import xml.etree.ElementTree as ET
-
     app = _get_app("rm")
     project = app.find_project(project_name)
     if not project:
@@ -230,7 +228,7 @@ def list_requirements(
     if not req_qc:
         return json.dumps({"error": "Query capability para Requirement não encontrada"})
 
-    # Execute OSLC query
+    # Execute OSLC query — with select, returns dict {uri: {attr: value}}
     dcterms_uri = rdfxml.RDF_DEFAULT_PREFIX.get("dcterms", "http://purl.org/dc/terms/")
     results = project.execute_oslc_query(
         req_qc,
@@ -240,41 +238,29 @@ def list_requirements(
         maxresults=max_results,
     )
 
-    # Resolve each URI to get title and identifier
+    # Extract artifacts directly from query results (no individual GETs needed)
     artifacts = []
-    for uri in results:
+    items = results.items() if isinstance(results, dict) else [(uri, {}) for uri in results]
+    for uri, attrs in items:
         if not isinstance(uri, str):
             continue
-        try:
-            resp = project.execute_get_raw(uri)
-            if resp.status_code != 200:
-                continue
-            root = ET.fromstring(resp.text)
-            title = ""
-            identifier = ""
-            for elem in root.iter():
-                if elem.tag == "{http://purl.org/dc/terms/}title" and elem.text:
-                    title = _safe_str(elem.text)
-                elif elem.tag == "{http://purl.org/dc/terms/}identifier" and elem.text:
-                    identifier = elem.text
-            if title:
-                # Determine type from URI pattern
-                res_id = uri.split("/")[-1]
-                prefix = res_id.split("_")[0] if "_" in res_id else "?"
-                art_type = {"TX": "Text", "WR": "Requirement", "DM": "Module"}.get(prefix, prefix)
-                artifacts.append({
-                    "id": identifier,
-                    "title": title[:200],
-                    "type": art_type,
-                    "uri": uri,
-                })
-        except Exception:
+        title = _safe_str(attrs.get("dcterms:title", "")) if isinstance(attrs, dict) else ""
+        identifier = attrs.get("dcterms:identifier", "") if isinstance(attrs, dict) else ""
+        if not title:
             continue
+        res_id = uri.split("/")[-1]
+        prefix = res_id.split("_")[0] if "_" in res_id else "?"
+        art_type = {"TX": "Text", "WR": "Requirement", "DM": "Module"}.get(prefix, prefix)
+        artifacts.append({
+            "id": identifier,
+            "title": title[:200],
+            "type": art_type,
+            "uri": uri,
+        })
 
     return json.dumps({
         "project": project_name,
-        "total_uris": len(results),
-        "resolved": len(artifacts),
+        "total": len(artifacts),
         "artifacts": artifacts,
     }, ensure_ascii=False, indent=2)
 
