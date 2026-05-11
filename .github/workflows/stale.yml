@@ -1,0 +1,16 @@
+name: Stale
+on:
+  schedule:
+    - cron: "0 10 * * 1"
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 90
+          days-before-close: 30
+          stale-issue-message: "Esta issue está inativa há 90 dias. Marcarei como stale. Se não houver atividade em 30 dias, será fechada."
+          stale-pr-message: "Este PR está inativo há 90 dias. Marcarei como stale. Se não houver atividade em 30 dias, será fechada."
+          days-before-issue-stale: 90
+          days-before-pr-stale: 90
