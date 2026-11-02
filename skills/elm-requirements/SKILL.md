@@ -86,7 +86,7 @@ create_requirement(
     project="MY RM PROJECT",
     title="REQ-001 User login",
     content="<p>As a user I want to log in...</p>",
-    type="https://elm.company.com/rm/types/_SHAPE_OID",       # from list_types -> shape_uri
+    type="https://elm.company.com/rm/types/_SHAPE_OID",  # from list_types -> shape_uri
     folder="https://elm.company.com/rm/folders/_FOLDER_OID",  # from list_folders -> uri
 )
 
