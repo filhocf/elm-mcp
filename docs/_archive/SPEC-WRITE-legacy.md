@@ -80,8 +80,10 @@ async def _find_creation_factory(domain: str, project_url: str) -> str:
     """Find OSLC CreationFactory URL for a project."""
     # Similar a _find_query_base mas busca oslc:CreationFactory em vez de QueryCapability
 
+
 async def create_resource(domain: str, project: str, payload: dict) -> dict:
     """POST a new resource to the creation factory."""
+
 
 async def update_resource(uri: str, payload: dict) -> dict:
     """PUT updated fields to an existing resource (with ETag)."""
