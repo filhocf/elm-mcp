@@ -22,6 +22,8 @@ Fatos que mudam o desenho:
 5. Comentário: escrita só pela API OSLC CM 1.0; leitura pela 2.0.
 6. Folha de horas: escrita só por API interna. Anexo: upload interno, link e download por OSLC.
 7. RM: `instanceShape` é obrigatório. Escrita direta na stream funciona quando a política do projeto permite; changeset é política por projeto.
+8. Work item não se exclui com papel comum (403): o ciclo de teste é criar e cancelar. No RM e no QM, DELETE funciona.
+9. QM responde só RDF/XML. Report Builder exige OAuth do Jazz sobre a sessão do JTS, e executar relatório é caro (mais de 120 s).
 
 ## Fatias
 
@@ -32,8 +34,11 @@ Fatos que mudam o desenho:
 | F3 | `SPEC-ccm-colaboracao` | Comentários, links WI↔WI, re-parent, `set_field` genérico (enum por nome), filtros de consulta, ações por item | 🟡 |
 | F4 | `SPEC-perfil-template` | Perfil por template de processo (valores padrão, rótulos de ações, enums dependentes) | 🟡 |
 | F5 | `SPEC-ccm-interno` | Folha de horas e upload de anexo por API interna, atrás de flag | 🟡 |
+| F6 | `SPEC-qm-leitura` | QM: corrige D12 (`search_testcases` devolve XML cru), leitura dos 14 tipos, cobertura de testes | 🟡 |
+| F7 | `SPEC-qm-write` | QM: criar/atualizar/excluir recursos de teste e vínculos a requisito e work item | 🔴 |
+| F8 | `SPEC-reportbuilder-rs` | Report Builder: OAuth do Jazz, execução pelo dataservice com limite e timeout | 🟡 |
 
-Ordem: F1 → F2 → F3 → F4 → F5. F1 e F2 são correção de defeito e destravam o resto.
+Ordem: F1 → F2 → F3 → F6 → F4 → F5 → F8 → F7. F1 e F2 são correção de defeito e destravam o resto.
 
 Fora de escopo: convenções de equipe (sinais de aprovação em comentário, regra de pontos, "iniciar tarefa" composta),
 extração de texto de anexos, criação de plano de iteração (API interna, baixo valor), exclusão de work item (depende de permissão
