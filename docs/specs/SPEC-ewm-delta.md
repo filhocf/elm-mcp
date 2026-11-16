@@ -10,9 +10,9 @@ isolando o que é interno ou específico de instalação. O ponto de partida foi
 (10 já cobertas, 9 em parte, 19 ausentes no elm-mcp), e a verificação de leitura e escrita no servidor de referência.
 
 ## Evidência (G0)
-Verificação feita no servidor de referência (ELM 7.0.1 SR1), com itens descartáveis. Detalhe e reprodução:
-`conhecimentos-de-ia/ferramentas/elm-mcp/testes-alm-dtp-leitura-2026-11-16.md`, `testes-alm-dtp-escrita-mir-2026-11-16.md`,
-`docs-oficiais-elm-recursos.md` e `delta-cadu-ia-ewm-rm.md` (repositório de pesquisa do mantenedor).
+Verificação feita no servidor de referência (ELM 7.0.1 SR1), com itens descartáveis, em 16/nov/2026. Relatórios de leitura e
+escrita, levantamento das docs oficiais e scripts de reprodução ficam no repositório de pesquisa do mantenedor (não público,
+contém dados da instalação).
 
 Fatos que mudam o desenho:
 1. A customização vive no **template de processo**: project areas do mesmo template têm tipos, propriedades e literais idênticos.
