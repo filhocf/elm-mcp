@@ -22,10 +22,20 @@ O workflow e a project area saem da URI de `rtc_cm:state` do item (`…/oslc/wor
 Zero ou mais de um candidato: `ToolError` listando os ids disponíveis. O docstring, `docs/TOOLS.md` e a skill `elm-workitems`
 passam a dizer que `action` é o id (ou sufixo) da ação do workflow, e que as quatro palavras valem só onde o template as tem.
 | D11 | `update_resource` | PUT do recurso inteiro mesclado (130+ campos) | PUT parcial `?oslc.properties=<props alteradas>` com `If-Match` |
+| D13 | `create_workitem` sem `filed_against` | 500 `Child team area is not part of this team area hierarchy` (aceitação viva, loop 1) | `_find_default_category` usa o último segmento da URL do projeto (`services.xml`) como id da project area, e `/ccm/oslc/categories?projectArea=` ignora o filtro (devolve as categorias de todas as áreas). Fonte correta: `oslc:defaultValue` da propriedade `filedAgainst` no shape do tipo; sem default, o primeiro de `oslc:allowedValues` dessa propriedade |
+
+### Formato real do shape no servidor de referência (D2, achado na aceitação viva do loop 1)
+O shape de CCM não usa elementos `<oslc:Property>`. Cada propriedade é um bloco
+`<rdf:Description rdf:about="…/shapes/workitems/{tipo}/property/{id}">` com `<rdf:type rdf:resource="http://open-services.net/ns/core#Property"/>`,
+`oslc:name`, `oslc:propertyDefinition`, `oslc:occurs`, `oslc:readOnly`, `oslc:defaultValue`, `oslc:allowedValues`, `dcterms:title`
+(com `rdf:parseType="Literal"`) em qualquer ordem. O `rdf:about` da propriedade pode diferir do nome (ex.: `…/property/category` para `filedAgainst`).
+O parser DEVE aceitar os dois formatos (elemento `oslc:Property` e `rdf:Description` tipado), e RM/QM não podem regredir.
 
 ## Critério de aceite (EARS)
 - QUANDO `list_types("ccm", projeto)` for chamado, o sistema DEVE retornar um item por fábrica de criação, com título, identificador do tipo, URI da fábrica e URI do shape, e NÃO DEVE retornar propriedades de shape.
-- QUANDO `list_fields("ccm", projeto, tipo)` receber o identificador ou o título de um tipo listado, o sistema DEVE retornar as propriedades do shape com ocorrência, somente-leitura e `allowedValues`.
+- QUANDO `list_fields("ccm", projeto, tipo)` receber o identificador ou o título de um tipo listado, o sistema DEVE retornar as propriedades do shape com ocorrência, somente-leitura e `allowedValues`, nos dois formatos de shape descritos acima.
+- SE o shape tiver propriedades e o parser não extrair nenhuma, ENTÃO o sistema DEVE levantar `ToolError` em vez de devolver listas vazias.
+- QUANDO `create_workitem` for chamado sem `filed_against`, o sistema DEVE usar o `oslc:defaultValue` da propriedade `filedAgainst` do shape do tipo e, na falta dele, o primeiro valor de `oslc:allowedValues` dessa propriedade; o sistema NÃO DEVE usar categorias de outra project area.
 - QUANDO `owner` for informado em criação ou atualização, o sistema DEVE gravá-lo em `dcterms:contributor`.
 - QUANDO `create_workitem` for chamado, o sistema DEVE enviar o POST à fábrica de criação do tipo pedido.
 - SE o servidor recusar uma escrita com `oslc:message`, ENTÃO o sistema DEVE levantar `ToolError` contendo essa mensagem.
