@@ -95,9 +95,9 @@ Full reference with signatures: [docs/TOOLS.md](docs/TOOLS.md). Query syntax and
 list_types(domain="ccm", project="MY PROJECT (KEY)")
 list_fields(domain="ccm", project="MY PROJECT (KEY)", type="Task")
 
-# Create a task and move it to "start"
+# Create a task and run a workflow action (id or id suffix of an action of the item's workflow)
 create_workitem(project="MY PROJECT (KEY)", title="Wire up OSLC discovery", type="task")
-transition_workitem(id="12345", action="start")
+transition_workitem(id="12345", action="a27")
 ```
 
 ## How it works

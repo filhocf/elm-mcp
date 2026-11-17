@@ -171,7 +171,7 @@ CCM_SERVICES_WITH_SHAPES_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
             <oslc:CreationFactory>
                 <dcterms:title>Defect</dcterms:title>
                 <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
-                <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_proj1/workitems"/>
+                <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_proj1/workitems/_defect"/>
                 <oslc:resourceShape rdf:resource="{CCM_SHAPE_URI}"/>
             </oslc:CreationFactory>
         </oslc:creationFactory>

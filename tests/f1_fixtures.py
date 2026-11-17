@@ -1,6 +1,6 @@
 """Shared tenant-neutral fixtures for the F1 (CCM corrections) tests.
 
-Formats mirror the real server captures documented in .gates/G1-respostas-manager.md,
+Formats mirror real server captures (ELM 7.0.1 SR1),
 with neutral values: host https://elm.example.com, project area _PA1, user jdoe,
 custom type com.example.workitem.debt.
 """

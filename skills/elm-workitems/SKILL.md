@@ -66,11 +66,14 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
 ### Update & transition
 
 8. **Update fields.** `update_workitem(id, title=None, description=None, owner=None,
-   estimate_hours=None, planned_for=None, custom_fields=None)` — ETag-based PUT; pass only the
-   fields you want to change. Use `planned_for` (an iteration URI) to plan into a sprint.
-9. **Change state.** `transition_workitem(id, action)` with `action` ∈
-   `start`, `resolve`, `close`, `reopen`. **State changes go through the workflow action, not
-   `update_workitem`** — you cannot set state by writing a field.
+   estimate_hours=None, planned_for=None, custom_fields=None)` — partial PUT with `If-Match`;
+   pass only the fields you want to change (only those are sent). A stale ETag is a conflict error. Use `planned_for` (an iteration URI) to plan into a sprint.
+9. **Change state.** `transition_workitem(id, action)` where `action` is the id (or id suffix,
+   e.g. `a27`) of a workflow action of the item's workflow. A unique case-insensitive substring
+   also works. The words `start`/`resolve`/`close`/`reopen` work only where your workflow's
+   action ids contain them. If `action` is unknown or ambiguous the error lists the available ids;
+   if the action does not change the state you get an error. **State changes go through the
+   workflow action, not `update_workitem`** — you cannot set state by writing a field.
 
 ## Examples
 
@@ -117,19 +120,18 @@ update_workitem(
 )
 
 # --- Transition (workflow action, NOT update_workitem) ---
-transition_workitem(id="100300", action="start")
-transition_workitem(id="100300", action="resolve")
-transition_workitem(id="100300", action="close")
-transition_workitem(id="100300", action="reopen")
+transition_workitem(id="100300", action="a27")        # id suffix of a workflow action
+transition_workitem(id="100300", action="start")      # only if a unique action id contains "start"
 ```
 
 ## Notes / Gotchas
 
 - **`type` is only `"task"` or `"story"`** on `create_workitem` / `add_child_workitem` today.
   Other kinds (defect, risk, impediment, …) are on the roadmap, not yet supported.
-- **State is a workflow action, not a field.** Use `transition_workitem(action=...)` with one
-  of `start` / `resolve` / `close` / `reopen`; do not try to set state via `update_workitem`.
-  The valid actions depend on the item's current state in its workflow.
+- **State is a workflow action, not a field.** Use `transition_workitem(action=...)` with the id
+  (or id suffix) of a workflow action; do not try to set state via `update_workitem`.
+  The valid actions depend on the item's workflow and current state; a call with an
+  unknown action returns the list of action ids.
 - **Auto-discovery.** Category auto-discovery picks the project's first category — pass
   `filed_against` when there is more than one. Current-iteration auto-discovery prefers bounded
   iterations (with an end date) — pass `planned_for` if your sprint is not picked up.

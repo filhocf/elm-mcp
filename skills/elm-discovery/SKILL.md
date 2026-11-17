@@ -46,12 +46,14 @@ The core pattern is **list_types → list_fields**, with `list_folders` for RM a
 1. **Find the project area.** Use `list_projects(domain=...)` to get the project names
    (service providers) available for the domain you want.
 2. **List the resource types (shapes).** `list_types(domain, project)` returns
-   `[{"title", "shape_uri", "resource_type"}]`. The `title` is what you pass to
-   `list_fields`; the `shape_uri` is the `instanceShape` URI you pass to
+   `[{"title", "shape_uri", "resource_type"}]`. For `ccm` each item is a work item type
+   creation factory with extra `id`, `factory_title` and `factory_uri` (the `id` is the type id).
+   The `title` is what you pass to `list_fields`; the `shape_uri` is the `instanceShape` URI you pass to
    `create_requirement(type=...)`.
 3. **List the fields of a type.** `list_fields(domain, project, type)` returns
    `{"type", "shape_uri", "required": [...], "optional": [...]}`. `type` is a shape *title*
-   from step 2 (case-insensitive). Enumerated fields come with their `allowed_values` — use
+   from step 2 (case-insensitive); for `ccm` the type `id` or `title`, or the alias `task`/`story`.
+   Each field also carries `occurs` and `read_only`. Enumerated fields come with their `allowed_values` — use
    exactly those values, do not invent them.
 4. **RM only — list folders.** `list_folders(project)` returns `[{"title", "uri"}]`
    (system folders are filtered out). The `uri` is what `create_requirement(folder=...)`
