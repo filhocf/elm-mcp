@@ -135,12 +135,136 @@ def mock_ccm_discovery(form: str = "services_xml") -> respx.Route:
     return auth
 
 
-def mock_creation_context() -> None:
-    """Category + iteration discovery and session-refresh GETs used by create_workitem."""
+CORE = "http://open-services.net/ns/core#"
+RTC_CM = "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/"
+CAT_BASE = f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category"
+CAT_DEFAULT = f"{CAT_BASE}/_CATDEFAULT"
+CAT_2 = f"{CAT_BASE}/_CAT2"
+CAT_3 = f"{CAT_BASE}/_CAT3"
+
+
+def prop(
+    name: str,
+    title: str,
+    occurs: str = "Zero-or-one",
+    read_only: bool = False,
+    *,
+    about_id: str | None = None,
+    propdef: str | None = None,
+    default: str | None = None,
+    allowed: str | None = None,
+    range_uri: str | None = None,
+) -> dict:
+    """Spec of one shape property (rendered by real_shape_xml)."""
+    return {
+        "name": name,
+        "title": title,
+        "occurs": occurs,
+        "read_only": read_only,
+        "about_id": about_id or name,
+        "propdef": propdef or f"{BASE}/ccm/oslc/properties/{name}",
+        "default": default,
+        "allowed": allowed,
+        "range": range_uri,
+    }
+
+
+def _prop_description(type_id: str, p: dict, rotation: int) -> str:
+    """One REAL-format property block: typed rdf:Description, children in a rotated order."""
+    xsd = "http://www.w3.org/2001/XMLSchema#"
+    children = [
+        f'<oslc:occurs rdf:resource="{CORE}{p["occurs"]}"/>',
+        f'<oslc:propertyDefinition rdf:resource="{p["propdef"]}"/>',
+        f'<oslc:valueType rdf:resource="{CORE}Resource"/>',
+        f'<dcterms:title rdf:parseType="Literal">{p["title"]}</dcterms:title>',
+        f'<oslc:readOnly rdf:datatype="{xsd}boolean">{str(p["read_only"]).lower()}</oslc:readOnly>',
+        f'<oslc:name rdf:datatype="{xsd}string">{p["name"]}</oslc:name>',
+        f'<rdf:type rdf:resource="{CORE}Property"/>',
+    ]
+    if p["default"]:
+        children.append(f'<oslc:defaultValue rdf:resource="{p["default"]}"/>')
+    if p["allowed"]:
+        children.append(f'<oslc:allowedValues rdf:resource="{p["allowed"]}"/>')
+    if p["range"]:
+        children.append(f'<oslc:range rdf:resource="{p["range"]}"/>')
+    k = rotation % len(children)
+    children = children[k:] + children[:k]
+    about = f"{shape_uri(type_id)}/property/{p['about_id']}"
+    return f'<rdf:Description rdf:about="{about}">' + "".join(children) + "</rdf:Description>"
+
+
+def real_shape_xml(type_id: str, props: list[dict], *, rotate: bool = True) -> str:
+    """ResourceShape in the format the real server uses (rdf:Description typed core#Property).
+
+    Includes the rdf:Description of the ResourceShape itself (no rdf:type Property),
+    which must NOT be parsed as a property. Children order varies per block when rotate=True.
+    """
+    refs = "".join(f'<oslc:property rdf:resource="{shape_uri(type_id)}/property/{p["about_id"]}"/>' for p in props)
+    shape_desc = (
+        f'<rdf:Description rdf:about="{shape_uri(type_id)}">'
+        f'<rdf:type rdf:resource="{CORE}ResourceShape"/>'
+        f'<dcterms:title rdf:parseType="Literal">Shape of {type_id}</dcterms:title>'
+        f"{refs}</rdf:Description>"
+    )
+    blocks = "".join(_prop_description(type_id, p, i if rotate else 0) for i, p in enumerate(props))
+    return (
+        '<rdf:RDF xmlns:dcterms="http://purl.org/dc/terms/" '
+        'xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+        'xmlns:oslc="http://open-services.net/ns/core#">' + shape_desc + blocks + "</rdf:RDF>"
+    )
+
+
+def filed_against_prop(*, default: str | None, allowed: str | None) -> dict:
+    """filedAgainst as on the server: rdf:about ends in /property/category, name is filedAgainst."""
+    return prop(
+        "filedAgainst",
+        "Filed Against",
+        "Exactly-one",
+        about_id="category",
+        propdef=f"{RTC_CM}filedAgainst",
+        default=default,
+        allowed=allowed,
+        range_uri=f"{RTC_CM}Category",
+    )
+
+
+def allowed_values_url(type_id: str) -> str:
+    return f"{shape_uri(type_id)}/property/category/allowedValues"
+
+
+def allowed_values_xml(type_id: str, uris: list[str]) -> str:
+    vals = "".join(f'<oslc:allowedValue rdf:resource="{u}"/>' for u in uris)
+    return (
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+        'xmlns:oslc="http://open-services.net/ns/core#">'
+        f'<rdf:Description rdf:about="{allowed_values_url(type_id)}">{vals}</rdf:Description></rdf:RDF>'
+    )
+
+
+def default_task_props() -> list[dict]:
+    """Shape props for creation tests. 'priority' (with a defaultValue) comes BEFORE filedAgainst on purpose."""
+    return [
+        prop(
+            "priority",
+            "Priority",
+            default=f"{BASE}/ccm/oslc/enumerations/{PA}/priority/medium",
+            propdef=f"{RTC_CM}priority",
+        ),
+        filed_against_prop(default=CAT_DEFAULT, allowed=allowed_values_url("task")),
+        prop("plannedFor", "Planned For", propdef=f"{RTC_CM}plannedFor"),
+    ]
+
+
+def mock_creation_context(*, shapes: bool = True) -> None:
+    """Category (legacy decoy) + iteration discovery and session-refresh GETs used by create_workitem.
+
+    shapes=True also mocks every typed shape in the REAL format (filedAgainst default = _CATDEFAULT).
+    The legacy /categories route stays mocked with a decoy category from ANOTHER project area.
+    """
     respx.get(f"{BASE}/ccm/oslc/categories").mock(
         return_value=httpx.Response(
             200,
-            json={"oslc:results": [{"rdf:about": f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/_cat1"}]},
+            json={"oslc:results": [{"rdf:about": f"{CAT_BASE}/_OTHERPA"}]},
         )
     )
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
@@ -148,6 +272,14 @@ def mock_creation_context() -> None:
     respx.get(GENERIC_FACTORY).mock(return_value=httpx.Response(200, json={}))
     for type_id, _ in TYPED_FACTORIES:
         respx.get(factory_uri(type_id)).mock(return_value=httpx.Response(200, json={}))
+        if shapes:
+            respx.get(shape_uri(type_id)).mock(
+                return_value=httpx.Response(200, text=real_shape_xml(type_id, default_task_props()))
+            )
+    if shapes:
+        respx.get(allowed_values_url("task")).mock(
+            return_value=httpx.Response(200, text=allowed_values_xml("task", [CAT_DEFAULT, CAT_2]))
+        )
 
 
 # --------------------------------------------------------------------------

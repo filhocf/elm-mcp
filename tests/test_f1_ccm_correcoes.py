@@ -136,6 +136,7 @@ ALLOWED_URI = f"{BASE}/ccm/oslc/enumerations/_PA1/priority"
 
 
 def _prop(name: str, title: str, occurs: str, read_only: bool, allowed: str | None = None) -> str:
+    """LEGACY format (<oslc:Property> element) - kept only for the backward-compatibility tests."""
     allowed_el = f'<oslc:allowedValues rdf:resource="{allowed}"/>' if allowed else ""
     return f"""<oslc:property><oslc:Property>
         <oslc:name>{name}</oslc:name>
@@ -147,7 +148,7 @@ def _prop(name: str, title: str, occurs: str, read_only: bool, allowed: str | No
         </oslc:Property></oslc:property>"""
 
 
-def _type_shape(marker: str) -> str:
+def _legacy_type_shape(marker: str) -> str:
     props = "".join(
         [
             _prop("summary", "Summary", "Exactly-one", False),
@@ -162,10 +163,25 @@ def _type_shape(marker: str) -> str:
         <oslc:ResourceShape>{props}</oslc:ResourceShape></rdf:RDF>"""
 
 
+def _type_shape(marker: str, type_id: str = "task", *, rotate: bool = True) -> str:
+    """REAL server format: one typed rdf:Description (rdf:type core#Property) per property."""
+    return f.real_shape_xml(
+        type_id,
+        [
+            f.prop("summary", "Summary", "Exactly-one"),
+            f.prop("priority", "Priority", "One-or-many", allowed=ALLOWED_URI),
+            f.prop("estimate", "Estimate", "Zero-or-one", True),
+            f.prop("tags", "Tags", "Zero-or-many"),
+            f.prop(marker, marker, "Zero-or-one", about_id="marker"),
+        ],
+        rotate=rotate,
+    )
+
+
 def _mock_typed_shapes() -> None:
     for type_id, _ in f.TYPED_FACTORIES:
         marker = "marker_" + type_id.rsplit(".", 1)[-1]
-        respx.get(f.shape_uri(type_id)).mock(return_value=httpx.Response(200, text=_type_shape(marker)))
+        respx.get(f.shape_uri(type_id)).mock(return_value=httpx.Response(200, text=_type_shape(marker, type_id)))
     respx.get(ALLOWED_URI).mock(
         return_value=httpx.Response(
             200,
@@ -236,6 +252,103 @@ async def test_d2_list_fields_ccm_unknown_type_raises_toolerror_listing_types():
         await list_fields("ccm", PROJECT, "nonexistent")
     assert "task" in str(exc.value)
     assert DEBT_ID in str(exc.value)
+
+
+# ----------------------------------------------------------------------
+# D2 (loop 1) — real shape format: typed rdf:Description (rdf:type core#Property)
+# ----------------------------------------------------------------------
+REAL_TASK_PROPS = [
+    f.filed_against_prop(default=f.CAT_DEFAULT, allowed=f.allowed_values_url("task")),
+    f.prop("shortTitle", "Short Name", "Zero-or-one", True, propdef="http://open-services.net/ns/core#shortTitle"),
+    f.prop("summary", "Summary", "Exactly-one"),
+]
+
+
+def _by_name(props: list[dict]) -> dict[str, dict]:
+    return {p["name"]: p for p in props}
+
+
+@pytest.mark.parametrize("rotate", [True, False], ids=["children-rotated", "children-fixed-order"])
+@respx.mock
+async def test_d2_list_shape_properties_extracts_rdf_description_properties(rotate):
+    """D2 loop 1: every typed rdf:Description yields name/title/occurs/read_only/property_uri/allowed_values_uri."""
+    f.mock_auth()
+    respx.get(f.shape_uri("task")).mock(
+        return_value=httpx.Response(200, text=f.real_shape_xml("task", REAL_TASK_PROPS, rotate=rotate))
+    )
+    props = _by_name(await oslc.list_shape_properties(f.shape_uri("task")))
+    assert set(props) == {"filedAgainst", "shortTitle", "summary"}
+    fa = props["filedAgainst"]
+    assert fa["title"] == "Filed Against"  # dcterms:title with rdf:parseType="Literal"
+    assert fa["occurs"] == "Exactly-one"
+    assert fa["required"] is True
+    assert fa["read_only"] is False
+    assert fa["property_uri"] == f"{f.RTC_CM}filedAgainst"
+    assert fa["allowed_values_uri"] == f.allowed_values_url("task")
+    assert fa["range_uri"] == f"{f.RTC_CM}Category"
+    short = props["shortTitle"]
+    assert short["title"] == "Short Name"
+    assert short["read_only"] is True
+    assert short["occurs"] == "Zero-or-one"
+    assert short["property_uri"] == "http://open-services.net/ns/core#shortTitle"
+    assert short["allowed_values_uri"] is None
+
+
+@respx.mock
+async def test_d2_list_shape_properties_ignores_the_resource_shape_description():
+    """D2 loop 1: the rdf:Description of the ResourceShape (no rdf:type Property) is not a property."""
+    f.mock_auth()
+    respx.get(f.shape_uri("task")).mock(
+        return_value=httpx.Response(200, text=f.real_shape_xml("task", REAL_TASK_PROPS))
+    )
+    props = await oslc.list_shape_properties(f.shape_uri("task"))
+    assert len(props) == len(REAL_TASK_PROPS)
+    assert all(p["name"] for p in props)
+    assert all(p["title"] != "Shape of task" for p in props)
+
+
+@respx.mock
+async def test_d2_list_fields_ccm_real_format_partitions_required_and_optional():
+    """D2 loop 1: list_fields on the real format is not empty and keeps the required/optional partition."""
+    f.mock_ccm_discovery()
+    respx.get(f.shape_uri("task")).mock(
+        return_value=httpx.Response(200, text=f.real_shape_xml("task", REAL_TASK_PROPS))
+    )
+    respx.get(f.allowed_values_url("task")).mock(
+        return_value=httpx.Response(200, text=f.allowed_values_xml("task", [f.CAT_DEFAULT, f.CAT_2]))
+    )
+    result = await list_fields("ccm", PROJECT, "task")
+    assert _names(result["required"]) == {"filedAgainst", "summary"}
+    assert _names(result["optional"]) == {"shortTitle"}
+    fa = {p["name"]: p for p in result["required"]}["filedAgainst"]
+    assert [v["value_uri"] for v in fa["allowed_values"]] == [f.CAT_DEFAULT, f.CAT_2]
+
+
+@respx.mock
+async def test_d2_list_shape_properties_legacy_oslc_property_format_still_works():
+    """D2 loop 1 (no regression RM/QM): the old <oslc:Property> element format is still parsed."""
+    f.mock_auth()
+    respx.get(f.shape_uri("task")).mock(return_value=httpx.Response(200, text=_legacy_type_shape("marker_task")))
+    props = _by_name(await oslc.list_shape_properties(f.shape_uri("task")))
+    assert set(props) == {"summary", "priority", "estimate", "tags", "marker_task"}
+    assert props["priority"]["occurs"] == "One-or-many"
+    assert props["priority"]["allowed_values_uri"] == ALLOWED_URI
+    assert props["estimate"]["read_only"] is True
+
+
+@respx.mock
+async def test_d2_list_fields_ccm_shape_with_properties_but_none_extracted_raises_toolerror():
+    """D2 loop 1 EARS: shape lists properties (oslc:property refs) but none is extracted -> ToolError, not []."""
+    f.mock_ccm_discovery()
+    refs = "".join(f'<oslc:property rdf:resource="{f.shape_uri("task")}/property/p{i}"/>' for i in range(3))
+    unparseable = f"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dcterms="http://purl.org/dc/terms/" xmlns:oslc="http://open-services.net/ns/core#">
+        <rdf:Description rdf:about="{f.shape_uri("task")}">
+          <rdf:type rdf:resource="http://open-services.net/ns/core#ResourceShape"/>{refs}
+        </rdf:Description></rdf:RDF>"""
+    respx.get(f.shape_uri("task")).mock(return_value=httpx.Response(200, text=unparseable))
+    with pytest.raises(ToolError):
+        await list_fields("ccm", PROJECT, "task")
 
 
 # ======================================================================
@@ -600,3 +713,73 @@ async def test_d11_update_workitem_403_with_oslc_message_raises_toolerror_with_m
         await update_workitem(id=U_ID, title="X")
     assert SERVER_MESSAGE in str(exc.value)
     assert put.call_count == 1
+
+
+# ======================================================================
+# D13 (loop 1) — default category comes from the filedAgainst property of the TYPE shape
+# ======================================================================
+FILED_AGAINST_TAG = "}filedAgainst"
+CATEGORIES_PATH = "/ccm/oslc/categories"
+
+
+def _filed_against_uris(body: str) -> list[str]:
+    root = ET.fromstring(body)
+    return [e.get(f"{NS_RDF}resource") for e in root.iter() if e.tag.endswith(FILED_AGAINST_TAG)]
+
+
+def _categories_calls() -> list:
+    return [c for c in respx.calls if CATEGORIES_PATH in str(c.request.url)]
+
+
+def _setup_d13(type_id: str, props: list[dict], allowed: list[str] | None = None) -> None:
+    _setup_create(type_id)  # discovery + creation context (legacy /categories decoy, shapes mocked) + POST mocks
+    respx.get(f.shape_uri(type_id)).mock(return_value=httpx.Response(200, text=f.real_shape_xml(type_id, props)))
+    if allowed is not None:
+        respx.get(f.allowed_values_url(type_id)).mock(
+            return_value=httpx.Response(200, text=f.allowed_values_xml(type_id, allowed))
+        )
+
+
+@pytest.mark.parametrize("type_arg", ["task", "story"])
+@respx.mock
+async def test_d13_create_workitem_uses_shape_default_value_for_filed_against(type_arg):
+    """D13: no filed_against -> rtc_cm:filedAgainst = oslc:defaultValue of the type shape's filedAgainst
+    (about …/property/category), not the priority default, not a /categories result."""
+    type_id = {"task": "task", "story": STORY_ID}[type_arg]
+    _setup_d13(type_id, f.default_task_props(), [f.CAT_DEFAULT, f.CAT_2])
+    await create_workitem(project=PROJECT, title="T", type=type_arg)
+    assert _filed_against_uris(_posted_body()) == [f.CAT_DEFAULT]
+
+
+@respx.mock
+async def test_d13_create_workitem_without_default_value_uses_first_allowed_value():
+    """D13: filedAgainst without oslc:defaultValue -> first oslc:allowedValue of that property."""
+    props = [
+        f.prop("priority", "Priority", default=f"{BASE}/ccm/oslc/enumerations/_PA1/priority/medium"),
+        f.filed_against_prop(default=None, allowed=f.allowed_values_url("task")),
+    ]
+    _setup_d13("task", props, [f.CAT_2, f.CAT_3])
+    await create_workitem(project=PROJECT, title="T", type="task")
+    assert _filed_against_uris(_posted_body()) == [f.CAT_2]
+
+
+@pytest.mark.parametrize("with_default", [True, False], ids=["default-value", "first-allowed"])
+@respx.mock
+async def test_d13_create_workitem_never_calls_the_categories_route(with_default):
+    """D13: /ccm/oslc/categories ignores the project filter (categories of other areas) -> must not be called."""
+    props = [
+        f.filed_against_prop(default=f.CAT_DEFAULT if with_default else None, allowed=f.allowed_values_url("task"))
+    ]
+    _setup_d13("task", props, [f.CAT_2, f.CAT_3])
+    await create_workitem(project=PROJECT, title="T", type="task")
+    assert _categories_calls() == []
+    assert "_OTHERPA" not in _posted_body()
+
+
+@respx.mock
+async def test_d13_create_workitem_explicit_filed_against_wins():
+    """D13: explicit filed_against is sent as is, even if the shape has another default."""
+    _setup_d13("task", f.default_task_props(), [f.CAT_DEFAULT, f.CAT_2])
+    await create_workitem(project=PROJECT, title="T", type="task", filed_against=f.CAT_2)
+    assert _filed_against_uris(_posted_body()) == [f.CAT_2]
+    assert _categories_calls() == []
