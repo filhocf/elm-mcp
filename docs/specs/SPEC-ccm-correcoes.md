@@ -8,7 +8,7 @@
 |---|---|---|---|
 | D1 | `list_types("ccm")` | Devolve títulos de propriedades ("Children", "Verified") | Listar as `oslc:CreationFactory` do service provider: título, id do tipo, URI da fábrica e do shape |
 | D2 | `list_fields("ccm", tipo)` | `Type 'story' not found` | Resolver o tipo pelo resultado de D1 (id do tipo, título ou alias `task`/`story`) |
-| D6 | `create_workitem`, `update_workitem`, `add_child_workitem` (`owner`) | 409 `Unknown attribute ownedBy` | Gravar o responsável em `dcterms:contributor` |
+| D6 | `create_workitem` (e `add_child_workitem`, que delega) (`owner`) | 409 `Unknown attribute ownedBy` | Gravar o responsável em `dcterms:contributor` (`update_workitem` já usa o campo certo) |
 | D9 | `create_workitem` | 500 ao criar story pela fábrica genérica | POST na fábrica **do tipo**; propagar `oslc:message` do servidor no `ToolError` |
 | D10 | `transition_workitem` | Busca ações em `{item}/rtc_cm:workflowActions` (não existe; o servidor devolve o próprio item); fallback faz PUT em `rtc_cm:state` (ignorado com 200) | Executar por `?_action=<id>`; reler o estado. Resolver `action` contra as ações do workflow do item (ver abaixo). Aliases de perfil ficam para `SPEC-perfil-template` |
 
