@@ -78,6 +78,22 @@ def _mock_auth():
     respx.post(f"{BASE}/jts/j_security_check").mock(return_value=httpx.Response(200))
 
 
+def _mock_type_shapes(category_uri: str) -> None:
+    """F1/D13: the default category comes from the type's shape (oslc:defaultValue of filedAgainst),
+    in the real CCM format (rdf:Description typed core#Property), not from /ccm/oslc/categories."""
+    shape = f"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+        xmlns:dcterms="http://purl.org/dc/terms/" xmlns:oslc="http://open-services.net/ns/core#">
+      <rdf:Description rdf:about="{BASE}/shape/property/category">
+        <rdf:type rdf:resource="http://open-services.net/ns/core#Property"/>
+        <oslc:propertyDefinition rdf:resource="http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/filedAgainst"/>
+        <oslc:defaultValue rdf:resource="{category_uri}"/>
+        <oslc:name rdf:datatype="http://www.w3.org/2001/XMLSchema#string">filedAgainst</oslc:name>
+      </rdf:Description></rdf:RDF>"""
+    respx.get(url__regex=rf"{BASE}/ccm/oslc/context/_MWxBEJB7Ee-fe_bes9r78g/shapes/workitems/.*").mock(
+        return_value=httpx.Response(200, text=shape)
+    )
+
+
 def _mock_ccm_discovery():
     _mock_auth()
     respx.get(f"{BASE}/ccm/rootservices").mock(return_value=httpx.Response(200, text=CCM_ROOTSERVICES_XML))
@@ -89,12 +105,7 @@ def _mock_ccm_discovery():
     respx.get(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
         return_value=httpx.Response(200, json={})
     )
-    respx.get(f"{BASE}/ccm/oslc/categories").mock(
-        return_value=httpx.Response(
-            200,
-            json={"oslc:results": [{"rdf:about": f"{BASE}/ccm/oslc/categories/_MWxBEJB7Ee-fe_bes9r78g/default"}]},
-        )
-    )
+    _mock_type_shapes(f"{BASE}/ccm/oslc/categories/_MWxBEJB7Ee-fe_bes9r78g/default")
 
 
 @respx.mock
@@ -441,17 +452,8 @@ async def test_golden_category_uses_itemoid_format():
     respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/services").mock(
         return_value=httpx.Response(200, text=CCM_SERVICES_XML)
     )
-    # Category API must return itemOid format
-    respx.get(f"{BASE}/ccm/oslc/categories").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "oslc:results": [
-                    {"rdf:about": f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}"}
-                ]
-            },
-        )
-    )
+    # The type's shape carries the itemOid category as filedAgainst default
+    _mock_type_shapes(f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}")
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
     # Session refresh GET (create_resource does this before POST)
     respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(return_value=httpx.Response(200, json={}))

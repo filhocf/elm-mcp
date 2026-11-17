@@ -13,7 +13,11 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
   creation factory: `title`, `id`, `factory_title`, `factory_uri`, `shape_uri`, `resource_type`
   (generic factories are not listed).
 - **D2** `list_fields("ccm", ...)` failed with `Type 'story' not found`. The type is now resolved by id, title or
-  alias (`task`/`story`); fields gain `occurs` and `read_only` (additive, also for rm/qm).
+  alias (`task`/`story`); fields gain `occurs` and `read_only` (additive, also for rm/qm). Loop 1: the shape parser
+  now reads the format the CCM server really uses (`rdf:Description` typed `core#Property`, children in any order,
+  `dcterms:title` with `rdf:parseType="Literal"`; the ResourceShape's own Description is ignored) besides the
+  `<oslc:Property>` blocks of RM/QM. A shape that references properties but yields none raises an error instead of `[]`.
+  `allowedValues` resources that list `oslc:allowedValue` references no longer return their own URI as a value.
 - **D6** `create_workitem` / `add_child_workitem` sent `rtc_cm:ownedBy` (HTTP 409). `owner` is now written to
   `dcterms:contributor`, as `update_workitem` already did.
 - **D9** `create_workitem` returned HTTP 500 for stories (generic factory). It now POSTs to the factory of the
@@ -26,6 +30,11 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
 - **D11** `update_resource` / `update_workitem` PUT the whole merged resource (130+ fields). It now PUTs only the
   changed properties (`?oslc.properties=...`) with `If-Match`, returns the re-read item, and reports a stale
   ETag (412) as a conflict.
+
+- **D13** `create_workitem` without `filed_against` failed with HTTP 500 (`Child team area is not part of this team
+  area hierarchy`): the category came from `/ccm/oslc/categories`, which ignores the project filter. The default is now
+  the `oslc:defaultValue` of the `filedAgainst` property in the shape of the type, or the first `oslc:allowedValues`
+  entry when there is no default. `/ccm/oslc/categories` is no longer called.
 
 ### Changed
 

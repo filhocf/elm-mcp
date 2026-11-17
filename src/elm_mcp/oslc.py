@@ -229,27 +229,27 @@ async def get_resource(uri: str) -> dict:
     return await _get_json(client, uri)
 
 
-async def _find_default_category(project_url: str) -> str | None:
-    """Discover the default category (filedAgainst) for a CCM project area."""
-    client = await get_client()
-    # RTC exposes categories at /ccm/oslc/categories?projectArea={id}
-    project_area_id = project_url.rstrip("/").split("/")[-1]
-    categories_url = f"{settings.elm_url}/ccm/oslc/categories?projectArea={project_area_id}"
-    try:
-        resp = await client.get(
-            categories_url,
-            headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # Categories are in the response; pick the first (default) one
-        members = data.get("oslc:results", data.get("rdfs:member", []))
-        if members and isinstance(members, list):
-            first = members[0]
-            # Return the rdf:about URI of the category
-            return first.get("rdf:about", first.get("rdf:resource"))
-    except Exception as exc:  # noqa: BLE001 — discovery is best-effort, degrade to None
-        logger.debug("Iteration discovery failed: %s", exc)
+async def _find_default_category(project_url: str, wi_type: str) -> str | None:
+    """Default category (filedAgainst) for a work item type, read from the type's shape.
+
+    The `oslc:defaultValue` of the property whose propertyDefinition ends in /filedAgainst;
+    without a default, the first `oslc:allowedValues` entry. None when the shape has no such property.
+    (The /ccm/oslc/categories route ignores the project filter and is not used.)
+    """
+    factories = await _list_ccm_creation_factories(project_url)
+    shape_uri = _resolve_ccm_type(factories, wi_type)["shape_uri"]
+    if not shape_uri:
+        return None
+    for p in await list_shape_properties(shape_uri):
+        if not (p["property_uri"] or "").endswith("/filedAgainst"):
+            continue
+        if p["default_value"]:
+            return p["default_value"]
+        if p["allowed_values_uri"]:
+            values = await list_allowed_values(p["allowed_values_uri"])
+            if values:
+                return values[0]["value_uri"]
+        return None
     return None
 
 
@@ -967,36 +967,67 @@ def _occurs_required(occurs: str | None) -> bool:
     return ("Exactly-one" in occurs) or ("One-or-many" in occurs)
 
 
+_CORE_NS = "http://open-services.net/ns/core#"
+_RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _is_shape_property(el: ET.Element) -> bool:
+    """oslc:Property element (RM/QM) or rdf:Description typed core#Property (CCM)."""
+    if el.tag == f"{{{_CORE_NS}}}Property":
+        return True
+    if el.tag != f"{{{_RDF_NS}}}Description":
+        return False
+    return any(c.tag == f"{{{_RDF_NS}}}type" and c.get(f"{{{_RDF_NS}}}resource") == f"{_CORE_NS}Property" for c in el)
+
+
+def _shape_property(el: ET.Element) -> dict:
+    """Extract one property from its element, whatever the order of the children."""
+    text: dict[str, str] = {}
+    res: dict[str, str] = {}
+    for child in el:
+        key = _local(child.tag)
+        value = child.get(f"{{{_RDF_NS}}}resource")
+        if value is not None:
+            res.setdefault(key, value)
+        else:
+            text.setdefault(key, "".join(child.itertext()).strip())
+    occurs = res.get("occurs")
+    return {
+        "name": text.get("name") or None,
+        "title": text.get("title") or None,
+        "required": _occurs_required(occurs),
+        "occurs": _last_segment(occurs) if occurs else None,
+        "read_only": text.get("readOnly", "").lower() == "true",
+        "property_uri": res.get("propertyDefinition"),
+        "range_uri": res.get("range"),
+        "allowed_values_uri": res.get("allowedValues"),
+        "default_value": res.get("defaultValue"),
+    }
+
+
 async def list_shape_properties(shape_uri: str) -> list[dict]:
     """GET a resourceShape and extract its properties.
 
-    For each oslc:Property block: name, title, required (from oslc:occurs), occurs
-    (last segment, e.g. Exactly-one), read_only, property_uri (propertyDefinition),
-    range_uri, allowed_values_uri.
-    Returns [{"name","title","required","occurs","read_only","property_uri","range_uri","allowed_values_uri"}].
+    Two formats: <oslc:Property> blocks (RM/QM) and <rdf:Description> typed core#Property
+    (CCM; the ResourceShape's own Description is not a property). Each entry: name, title,
+    required (from oslc:occurs), occurs (last segment), read_only, property_uri
+    (propertyDefinition), range_uri, allowed_values_uri, default_value.
+    Raises ValueError when the shape references properties (oslc:property) but none could be extracted.
     """
     xml_text = await _get_xml_text(shape_uri)
-    props: list[dict] = []
-    for block in _re.findall(r"<\w*:?Property\b.*?</\w*:?Property>", xml_text, _re.DOTALL):
-        name_m = _re.search(r"<\w*:?name[^>]*>([^<]+)</\w*:?name>", block)
-        title_m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", block)
-        occurs_m = _re.search(r"<\w*:?occurs\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        propdef_m = _re.search(r"<\w*:?propertyDefinition\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        range_m = _re.search(r"<\w*:?range\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        allowed_m = _re.search(r"<\w*:?allowedValues\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        read_only_m = _re.search(r"<\w*:?readOnly\b[^>]*>([^<]+)</\w*:?readOnly>", block)
-        props.append(
-            {
-                "name": name_m.group(1).strip() if name_m else None,
-                "title": title_m.group(1).strip() if title_m else None,
-                "required": _occurs_required(occurs_m.group(1) if occurs_m else None),
-                "occurs": _last_segment(occurs_m.group(1)) if occurs_m else None,
-                "read_only": bool(read_only_m and read_only_m.group(1).strip().lower() == "true"),
-                "property_uri": propdef_m.group(1) if propdef_m else None,
-                "range_uri": range_m.group(1) if range_m else None,
-                "allowed_values_uri": allowed_m.group(1) if allowed_m else None,
-            }
-        )
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise ValueError(f"Shape '{shape_uri}' is not valid XML: {exc}") from exc
+    props = [_shape_property(el) for el in root.iter() if _is_shape_property(el)]
+    if not props:
+        refs = sum(1 for el in root.iter(f"{{{_CORE_NS}}}property") if el.get(f"{{{_RDF_NS}}}resource"))
+        if refs:
+            raise ValueError(f"Shape '{shape_uri}' lists {refs} properties but none could be extracted")
     return props
 
 
@@ -1008,24 +1039,19 @@ async def list_allowed_values(allowed_values_uri: str) -> list[dict]:
     Returns [{"value_uri", "title"}] (title None when absent).
     """
     xml_text = await _get_xml_text(allowed_values_uri)
-    values: list[dict] = []
-    # Format 2 first: rdf:Description blocks carry a title.
+    titles: dict[str, str | None] = {}
+    # rdf:Description blocks with rdf:about carry a title.
     for block in _re.findall(r"<\w*:?Description\b[^>]*>.*?</\w*:?Description>", xml_text, _re.DOTALL):
         about_m = _re.search(r"rdf:about=\"([^\"]+)\"", block)
         title_m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", block)
         if about_m:
-            values.append(
-                {
-                    "value_uri": about_m.group(1),
-                    "title": title_m.group(1).strip() if title_m else None,
-                }
-            )
-    if values:
-        return values
-    # Format 1: oslc:allowedValue rdf:resource (URIs only).
-    for uri in _re.findall(r"<\w*:?allowedValue\s+[^>]*rdf:resource=\"([^\"]+)\"", xml_text):
-        values.append({"value_uri": uri, "title": None})
-    return values
+            titles[about_m.group(1)] = title_m.group(1).strip() if title_m else None
+    # oslc:allowedValue rdf:resource lists the values (the real CCM container is itself a Description,
+    # whose rdf:about is NOT a value).
+    refs = _re.findall(r"<\w*:?allowedValue\s+[^>]*rdf:resource=\"([^\"]+)\"", xml_text)
+    if refs:
+        return [{"value_uri": uri, "title": titles.get(uri)} for uri in refs]
+    return [{"value_uri": uri, "title": title} for uri, title in titles.items()]
 
 
 async def list_fields(domain: str, project: str, type: str) -> dict:
