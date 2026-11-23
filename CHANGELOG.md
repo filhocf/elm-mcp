@@ -43,6 +43,11 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
 - **D13** `create_workitem` without `filed_against` no longer sends a category (the server applies its own default) and
   no longer looks one up; a refusal about the category now adds a hint to use `list_fields` (property `filedAgainst`).
 
+### Added
+
+- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
+- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
+
 ### Changed
 
 - **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
@@ -62,8 +67,6 @@ RM write and discovery: the agentic membrane for DOORS Next.
 ### Added
 
 - Discovery tools `list_types`, `list_fields`, `inspect_workitem` and `list_folders` — enumerate types, shape fields and folders per project area, so callers adapt to each project instead of hardcoding (#45).
-- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
-- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
 - `create_requirement` tool — create a requirement in DOORS Next (RM) via OSLC; HTML content is
   sanitized to XHTML and stored in `jazz_rm:primaryText`; optional `folder` (nav:parent) and `type`
   (instanceShape URI).
