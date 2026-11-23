@@ -63,6 +63,17 @@ def _no_real_credentials(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_discovery_cache(monkeypatch):
+    """The discovery cache is per process: empty it around every test so no test sees another's discovery."""
+    from elm_mcp import cache
+
+    monkeypatch.delenv("ELM_CACHE_TTL", raising=False)
+    cache.clear()
+    yield
+    cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def _block_real_network(monkeypatch):
     """Raise on any real connection; respx mocks (installed later, on top) are unaffected."""
 

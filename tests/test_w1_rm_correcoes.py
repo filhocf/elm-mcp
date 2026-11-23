@@ -101,7 +101,7 @@ async def test_d7_create_requirement_without_type_lists_rm_types_and_sends_no_po
     )
 
     with pytest.raises(ToolError) as exc_info:
-        await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>")
+        await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>", if_exists="create")
 
     message = str(exc_info.value)
     assert "Requirement" in message
@@ -118,7 +118,9 @@ async def test_d7_create_requirement_unknown_type_title_lists_valid_types_and_se
     )
 
     with pytest.raises(ToolError) as exc_info:
-        await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>", type="No Such Type")
+        await server.create_requirement(
+            project=PROJECT, title="Req", content="<p>x</p>", type="No Such Type", if_exists="create"
+        )
 
     message = str(exc_info.value)
     assert "Requirement" in message
@@ -135,7 +137,9 @@ async def test_d7_create_requirement_type_title_is_resolved_to_shape_uri():
     )
     respx.get(CREATED_URI).mock(return_value=httpx.Response(200, text=CREATED_RDF))
 
-    await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>", type="Feature")
+    await server.create_requirement(
+        project=PROJECT, title="Req", content="<p>x</p>", type="Feature", if_exists="create"
+    )
 
     assert post_route.call_count == 1
     body = post_route.calls[0].request.content.decode()
@@ -153,7 +157,11 @@ async def test_d8_create_requirement_returns_uri_and_identifier_read_from_server
     reread_route = respx.get(CREATED_URI).mock(return_value=httpx.Response(200, text=CREATED_RDF))
 
     result = await server.create_requirement(
-        project=PROJECT, title="New Requirement", content="<p>x</p>", type=SHAPE_REQ
+        project=PROJECT,
+        title="New Requirement",
+        content="<p>x</p>",
+        type=SHAPE_REQ,
+        if_exists="create",
     )
 
     assert reread_route.called, "the created artifact was never re-read"

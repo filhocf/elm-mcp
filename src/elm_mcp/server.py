@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import oslc, qm
+from . import cache, oslc, profile, qm
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 mcp = MCPServer("elm-mcp", instructions="IBM ELM (DOORS Next, RTC, ETM) via OSLC")
 
 VALID_DOMAINS = ("rm", "ccm", "qm")
+
+# Creation errors that may come from a stale shape or value (validation): rediscover once and resend once.
+_STALE_SHAPE_STATUSES = (400, 409)
 
 _T = TypeVar("_T")
 
@@ -68,14 +71,23 @@ async def list_projects(domain: str) -> list[dict]:
 
 
 @read_tool
-async def search_requirements(project: str, query: str | None = None) -> dict:
+async def search_requirements(project: str, query: str | None = None, limit: int | None = None) -> dict:
     """Search requirements in a DOORS Next project. Query uses oslc.where syntax.
 
-    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
-    truncated=True means the query has more items than were returned.
+    The project's configuration (stream) is discovered and sent as Configuration-Context; the first
+    stream listed is used. Follows the server's pages until `limit` items (default and maximum 1000).
+    Returns {"items": [{"uri", "title", "identifier", "type", "modified", "folder"?}], "truncated": bool,
+    "total"?: int, "configuration"?: stream URI}; truncated=True means the query has more items than were
+    returned; total (matches reported by the server) and configuration (the stream sent) appear when known.
     """
-    results = await oslc.query_resources("rm", project, query, limit=oslc.MAX_QUERY_LIMIT)
-    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
+    results = await oslc.query_resources(
+        "rm", project, query, limit=limit if limit is not None else oslc.MAX_QUERY_LIMIT
+    )
+    result = {"items": list(results), "truncated": getattr(results, "truncated", False)}
+    for name in ("total", "configuration"):
+        if getattr(results, name, None) is not None:
+            result[name] = getattr(results, name)
+    return result
 
 
 @read_tool
@@ -93,6 +105,7 @@ async def list_workitems(
     state: str | None = None,
     owner: str | None = None,
     planned_for: str | None = None,
+    include_hidden: bool = False,
 ) -> dict:
     """Search work items in an RTC project. Query uses oslc.where syntax.
 
@@ -104,6 +117,8 @@ async def list_workitems(
             workflow); otherwise pass the id
         owner: user id (e.g. "jdoe") or user URI, always sent as a URI (dcterms:contributor)
         planned_for: iteration URI (rtc_cm:plannedFor, see list_iterations)
+        include_hidden: false (default) leaves out, on the client, the states the local profile lists in
+            hidden_states (e.g. closed ones); true returns them too. A `state` filter is never hidden.
     A filter value with a double quote, angle bracket, backslash or non-printable character is refused.
     The raw `query` is combined with the filters only with `and`: `or` is not supported (oslc.where has
     no disjunction), so a `query` containing `or` is not guaranteed to work.
@@ -115,9 +130,22 @@ async def list_workitems(
     clauses += await oslc.workitem_filters(project, type=type, state=state, owner=owner, planned_for=planned_for)
     query = " and ".join(clauses) or None
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
+    hidden: set[str] = set()
+    warning = None
+    if not include_hidden and not state and profile.profile_dir().is_dir():  # no profile directory: no extra request
+        project_url = await oslc._resolve_project_url("ccm", project)
+        try:
+            hidden = profile.hidden_states(profile.load(oslc._project_area_id(project_url)))
+        except ValueError as exc:  # a broken profile must not take the listing down
+            warning = f"The local profile was ignored (hidden_states not applied): {exc}"
+        if hidden:
+            select += ",rtc_cm:state"
     results = await oslc.query_resources("ccm", project, query, select=select, limit=limit)
     parsed = []
     for item in results:
+        state_uri = oslc._resource_uri(item.get("rtc_cm:state"))
+        if hidden and state_uri and oslc._last_segment(state_uri) in hidden:
+            continue
         entry = {"rdf:about": item.get("rdf:about", item.get("rdf:resource", ""))}
         if "dcterms:title" in item:
             entry["title"] = item["dcterms:title"]
@@ -132,7 +160,10 @@ async def list_workitems(
             c = item["dcterms:contributor"]
             entry["owner"] = c.get("rdf:resource", c) if isinstance(c, dict) else c
         parsed.append(entry)
-    return {"items": parsed, "truncated": getattr(results, "truncated", False)}
+    result = {"items": parsed, "truncated": getattr(results, "truncated", False)}
+    if warning:
+        result["warning"] = warning
+    return result
 
 
 @read_tool
@@ -350,8 +381,17 @@ async def create_workitem(
     owner: str | None = None,
     filed_against: str | None = None,
     custom_fields: dict | None = None,
+    if_exists: str = "error",
 ) -> dict:
     """Create a work item in an RTC project via OSLC.
+
+    Before creating, a work item of the same type, title and parent is looked up (see if_exists). The server
+    compares the title EXACTLY (case and inner spaces count; only leading/trailing spaces of the request are
+    dropped); the returned titles are then compared ignoring case and repeated spaces, which only matters when
+    the server returned them. Required fields the call leaves out are filled from the local profile
+    (defaults of the type, see `elm-mcp profile draft`); any still missing are refused, listed.
+    Returns the created work item plus `created: true`; an existing one (if_exists="return") comes as
+    {"rdf:about", "dcterms:identifier", "dcterms:title", "created": false}.
 
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
@@ -361,9 +401,58 @@ async def create_workitem(
         parent_id: Parent work item ID (optional)
         owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
         filed_against: Category URI (optional). If not provided, the property is not sent and the server applies its own default. Valid values: list_fields (property filedAgainst, allowedValues).
-        custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
+        custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"}); wins over the profile
+        if_exists: What to do when the same work item already exists. "error" (default) refuses naming it; "return" returns it
+            with created=false and writes nothing; "create" creates anyway. If the duplicate check itself fails the creation
+            is refused (except "create"), also when the check was truncated (more than 1000 candidates). A timeout
+            after the request was sent never resends it: the check runs again. After a 400/409 the check also runs
+            again before the single resend, and a work item that appeared meanwhile is returned instead.
     """
+    oslc.check_if_exists(if_exists)
     project_url = await oslc._resolve_project_url("ccm", project)
+    try:
+        return await _create_workitem_once(
+            project, project_url, title, type, description, parent_id, owner, filed_against, custom_fields, if_exists
+        )
+    except oslc.WriteRejected as exc:
+        if exc.status_code not in _STALE_SHAPE_STATUSES:
+            raise
+        seen = getattr(exc, "before", [])
+    # 400/409 may mean a stale shape or value: drop the project area's discovery, rediscover and resend ONCE
+    # (SPEC-cache-shape). A second refusal is reported as it came. Extension point for the local profile
+    # (SPEC-perfil-template): the discovery fallback plugs into cache.get_or_fetch(fallback=...).
+    cache.invalidate(oslc._project_area_id(project_url))
+    project_url = await oslc._resolve_project_url("ccm", project)
+    # The server may have created the item before answering 400/409: the duplicate check runs again
+    # (items already seen before the first POST do not count) and the POST is resent only if nothing new shows up.
+    return await _create_workitem_once(
+        project,
+        project_url,
+        title,
+        type,
+        description,
+        parent_id,
+        owner,
+        filed_against,
+        custom_fields,
+        if_exists,
+        known=seen,
+    )
+
+
+async def _create_workitem_once(
+    project: str,
+    project_url: str,
+    title: str,
+    type: str,
+    description: str | None,
+    parent_id: str | None,
+    owner: str | None,
+    filed_against: str | None,
+    custom_fields: dict | None,
+    if_exists: str,
+    known: list[dict] | None = None,
+) -> dict:
     factory = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)
     type_id = factory["id"]
     project_area_id = oslc._project_area_id(project_url)
@@ -382,14 +471,30 @@ async def create_workitem(
         payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner, safe='')}"}
     if filed_against:
         payload["rtc_cm:filedAgainst"] = {"rdf:resource": filed_against}
-    # Auto-discover current iteration
-    planned_for = await oslc._find_current_iteration(project_url)
-    if planned_for:
-        payload["rtc_cm:plannedFor"] = {"rdf:resource": planned_for}
-    # Inject custom fields (project-specific customizations)
+    # Inject custom fields (project-specific customizations); they win over the local profile
     if custom_fields:
-        payload.update(custom_fields)
-    return await oslc.create_resource("ccm", project, payload, factory=factory, project_url=project_url)
+        payload.update({oslc.canonical_property_key(k): v for k, v in custom_fields.items()})
+    for key, value in profile.type_defaults(profile.load(project_area_id), type_id).items():
+        payload.setdefault(key, value)
+    # Auto-discover current iteration
+    if "rtc_cm:plannedFor" not in payload:
+        planned_for = await oslc._find_current_iteration(project_url)
+        if planned_for:
+            payload["rtc_cm:plannedFor"] = {"rdf:resource": planned_for}
+    missing = await oslc.missing_required_fields(factory, payload)
+    if missing:
+        raise ValueError(
+            f"Required fields missing for type '{type_id}': {', '.join(missing)}. Pass them in custom_fields or "
+            "define defaults for the type in the local profile (elm-mcp profile draft <project>)."
+        )
+
+    async def find() -> list[dict]:
+        return await oslc.find_workitem_duplicates(project, title, type_id, parent_id)
+
+    async def create() -> dict:
+        return await oslc.create_resource("ccm", project, payload, factory=factory, project_url=project_url)
+
+    return await oslc.create_idempotent(if_exists, find, create, "work item", known=known)
 
 
 @tool
@@ -440,8 +545,13 @@ async def add_child_workitem(
     type: str = "task",
     description: str | None = None,
     owner: str | None = None,
+    if_exists: str = "error",
 ) -> dict:
-    """Create a child work item under a parent in an RTC project."""
+    """Create a child work item under a parent in an RTC project (same duplicate check as create_workitem).
+
+    if_exists: "error" (default) refuses a work item of the same type, title and parent; "return" returns it
+    with created=false; "create" creates anyway.
+    """
     return await create_workitem(
         project=project,
         title=title,
@@ -449,6 +559,7 @@ async def add_child_workitem(
         description=description,
         parent_id=parent_id,
         owner=owner,
+        if_exists=if_exists,
     )
 
 
@@ -566,17 +677,19 @@ async def set_field(id: str, field: str, value: str) -> dict:
 
 
 @read_tool
-async def list_workflow(project: str, type: str) -> dict:
+async def list_workflow(project: str, type: str, refresh: bool = False) -> dict:
     """List the workflow of a work item type: states (id, title, group) and action ids.
 
     Args:
         project: Project name
         type: Type id, title or short alias (as in list_types / create_workitem)
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns {"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}.
     The action ids are the values accepted by transition_workitem.
     """
-    return await oslc.list_workflow(project, type)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_workflow(project, type)
 
 
 @tool
@@ -586,11 +699,17 @@ async def create_requirement(
     content: str,
     folder: str | None = None,
     type: str | None = None,
+    if_exists: str = "error",
 ) -> dict:
     """Create a requirement in a DOORS Next (RM) project via OSLC.
 
     The HTML content is sanitized to XHTML and stored in jazz_rm:primaryText.
-    Returns {"uri", "identifier"}, both read back from the server.
+    Before creating, a requirement of the same type, title and folder is looked up in the project's configuration
+    (see if_exists). The server compares the title EXACTLY (case and inner spaces count; only leading/trailing
+    spaces of the request are dropped). Without `folder`, a requirement in any folder counts as a duplicate
+    (accepted false positive): pass `folder`, or use if_exists="return"/"create". A truncated check (more than
+    1000 candidates) refuses the creation.
+    Returns {"uri", "identifier", "created"}, uri and identifier read back from the server.
 
     Args:
         project: RM project name (e.g., "MY RM PROJECT")
@@ -600,9 +719,14 @@ async def create_requirement(
         type: REQUIRED. Requirement type: the shape URI or the type title, both as shown by
             list_types("rm", project). Without it, or with an unknown title, the call is refused
             listing the valid types (the server would answer 403 CRRRS6404E).
+        if_exists: What to do when the same requirement already exists. "error" (default) refuses naming its URI and
+            identifier; "return" returns it with created=false and writes nothing; "create" creates anyway. If the
+            duplicate check itself fails the creation is refused (except "create"). A timeout after the request was
+            sent never resends it: the check runs again.
     """
+    oslc.check_if_exists(if_exists)
     xhtml = oslc.sanitize_html_to_xhtml(content)
-    return await oslc.create_requirement(project, title, xhtml, folder=folder, shape=type)
+    return await oslc.create_requirement(project, title, xhtml, folder=folder, shape=type, if_exists=if_exists)
 
 
 @tool
@@ -637,12 +761,13 @@ async def delete_requirement(uri: str) -> dict:
 
 
 @read_tool
-async def list_types(domain: str, project: str) -> list[dict]:
+async def list_types(domain: str, project: str, refresh: bool = False) -> list[dict]:
     """List resource types available in a project area.
 
     Args:
         domain: rm (DOORS Next) | ccm (RTC) | qm (ETM)
         project: Project name (as shown by list_projects)
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
     creation factory of a work item type:
@@ -652,11 +777,12 @@ async def list_types(domain: str, project: str) -> list[dict]:
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
         raise ToolError(f"Invalid domain '{domain}'. Must be one of: {VALID_DOMAINS}")
-    return await oslc.list_resource_shapes(domain, project)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_resource_shapes(domain, project)
 
 
 @read_tool
-async def list_fields(domain: str, project: str, type: str) -> dict:
+async def list_fields(domain: str, project: str, type: str, refresh: bool = False) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
     Args:
@@ -664,6 +790,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
         project: Project name
         type: Shape title (as shown by list_types); matched case-insensitively.
             For ccm: the type id or title from list_types, or a short alias (task, story...).
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns {"type", "shape_uri", "required":[...], "optional":[...]}; each field has
     name, title, occurs, read_only, property_uri, range_uri and allowed_values.
@@ -671,7 +798,8 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
         raise ToolError(f"Invalid domain '{domain}'. Must be one of: {VALID_DOMAINS}")
-    return await oslc.list_fields(domain, project, type)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_fields(domain, project, type)
 
 
 @read_tool

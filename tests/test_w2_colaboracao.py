@@ -83,7 +83,8 @@ async def test_new_tool_is_registered_with_the_agreed_required_parameters(name, 
     tools = await _registered()
     assert name in tools, f"tool not registered: {name}"
     schema = tools[name].input_schema or {}
-    assert list(schema.get("properties", {})) == params
+    # W4: ``refresh`` is an optional discovery-cache switch (never required)
+    assert [p for p in schema.get("properties", {}) if p != "refresh"] == params
     assert set(schema.get("required", [])) == set(params)
     hint = tools[name].annotations.read_only_hint if tools[name].annotations else None
     assert bool(hint) is read_only
@@ -95,7 +96,7 @@ async def test_list_workitems_gains_the_optional_filters_and_limit():
     schema = tool.input_schema or {}
     names = list(schema["properties"])
     assert names[:2] == ["project", "query"]
-    assert set(names[2:]) == {"type", "state", "owner", "planned_for", "limit"}
+    assert set(names[2:]) == {"type", "state", "owner", "planned_for", "limit", "include_hidden"}
     assert set(schema.get("required", [])) == {"project"}
     assert tool.annotations.read_only_hint is True
 

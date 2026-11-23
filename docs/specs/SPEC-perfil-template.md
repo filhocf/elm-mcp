@@ -1,6 +1,6 @@
 # SPEC — Perfil por template de processo
 
-**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F4 · **ADR:** ADR-003
+**Status:** IMPLEMENTADA (G4, ADR-005; aguarda G5 e aceitação viva) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F4 · **ADR:** ADR-003
 
 ## Meta
 Fornecer, fora do pacote, os valores que a API não dá ou que mudam por instalação, organizados **por template de processo**
@@ -11,7 +11,6 @@ Fornecer, fora do pacote, os valores que a API não dá ou que mudam por instala
 - Pares válidos de enums dependentes (o servidor filtra um enum pelo valor de outro).
 - Rótulos e aliases das ações de workflow (a API OSLC só devolve ids das ações).
 - Estados que listagens devem ocultar por padrão.
-- `rm_write_mode` por projeto (ver `SPEC-rm-correcoes`).
 
 ## Critério de aceite (EARS)
 - O sistema DEVE carregar o perfil de arquivo externo ao pacote; SE não houver perfil, ENTÃO DEVE operar só com discovery.
@@ -21,5 +20,9 @@ Fornecer, fora do pacote, os valores que a API não dá ou que mudam por instala
 - O sistema DEVE oferecer um comando que gera um rascunho de perfil a partir do discovery (tipos, obrigatórios, enums) para revisão humana.
 - O sistema NÃO DEVE conter valores de instalação no pacote, nos testes ou na documentação pública.
 
-## A decidir (mantenedor)
-Local do perfil (`~/.elm-mcp/profiles/` ou fornecido pelo cliente) e formato (YAML ou JSON).
+## Decisão
+Ver `ADR-005`: arquivo JSON em `ELM_MCP_PROFILE_DIR` ou `~/.elm-mcp/profiles/` (`templates/<nome>.json` e `project-areas/<chave>.json`), sem dependência nova.
+`rm_write_mode` fica FORA desta versão (modo changeset adiado em `SPEC-rm-correcoes`).
+
+## Implementação (G4)
+Chaves do JSON: `template` (só em `project-areas/`), `defaults.<id do tipo>.<propriedade prefixada>`, `action_aliases`, `hidden_states`; a chave do arquivo da project area é o id dela na URL do service provider. Chaves desconhecidas (ex.: `_review` do rascunho) são ignoradas; valor `null` em `defaults` é item do rascunho ainda por preencher e não é enviado. Template nomeado sem arquivo não é erro: vale só o arquivo da project area. Se o shape não pode ser lido, `create_workitem` envia o que tem (o perfil incluído) e o servidor valida.

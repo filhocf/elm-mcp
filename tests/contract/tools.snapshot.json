@@ -36,6 +36,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -85,6 +91,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -137,6 +149,12 @@
           "type": "null|object",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -317,6 +335,12 @@
           "name": "type",
           "type": "string",
           "required": true
+        },
+        {
+          "name": "refresh",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -394,6 +418,12 @@
           "name": "project",
           "type": "string",
           "required": true
+        },
+        {
+          "name": "refresh",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -410,6 +440,12 @@
           "name": "type",
           "type": "string",
           "required": true
+        },
+        {
+          "name": "refresh",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -457,6 +493,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "include_hidden",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -472,6 +514,12 @@
         {
           "name": "query",
           "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "limit",
+          "type": "integer|null",
           "required": false,
           "default": null
         }

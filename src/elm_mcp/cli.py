@@ -59,15 +59,41 @@ def login() -> None:
     print(f"✅ Credenciais salvas em {CRED_FILE} (senha em base64, chmod 600)")
 
 
+def profile_draft(project: str) -> None:
+    """Print a profile draft (JSON) for a CCM project, built from the discovery. Only reads (plus the login)."""
+    import asyncio
+
+    from . import oslc
+    from .auth import close_client
+
+    async def run() -> dict:
+        try:
+            return await oslc.build_profile_draft(project)
+        finally:
+            await close_client()
+
+    try:
+        draft = asyncio.run(run())
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        print(f"Erro: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps(draft, indent=2, ensure_ascii=False))
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "login":
         login()
+    elif len(sys.argv) > 1 and sys.argv[1] == "profile":
+        if len(sys.argv) != 4 or sys.argv[2] != "draft":
+            print("Uso: elm-mcp profile draft <project>")
+            sys.exit(1)
+        profile_draft(sys.argv[3])
     elif len(sys.argv) < 2 or sys.argv[1] == "serve":
         from .server import main as serve
 
         serve()
     else:
-        print("Uso: elm-mcp [login|serve]")
+        print("Uso: elm-mcp [login|serve|profile draft <project>]")
         sys.exit(1)
 
 

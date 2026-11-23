@@ -68,7 +68,11 @@ async def test_create_requirement_reread_failure_never_propagates(failure, caplo
         respx.get(CREATED_URI).mock(return_value=httpx.Response(401))
     with caplog.at_level(logging.WARNING, logger="elm_mcp.oslc"):
         result = await server.create_requirement(
-            project=PROJECT, title="New Requirement", content="<p>x</p>", type=SHAPE_REQ
+            project=PROJECT,
+            title="New Requirement",
+            content="<p>x</p>",
+            type=SHAPE_REQ,
+            if_exists="create",
         )
 
     assert post.call_count == 1, "the creation already happened: no second POST"
@@ -85,7 +89,11 @@ async def test_create_requirement_reread_failure_with_empty_post_body_returns_no
     respx.get(CREATED_URI).mock(return_value=httpx.Response(500))
 
     result = await server.create_requirement(
-        project=PROJECT, title="New Requirement", content="<p>x</p>", type=SHAPE_REQ
+        project=PROJECT,
+        title="New Requirement",
+        content="<p>x</p>",
+        type=SHAPE_REQ,
+        if_exists="create",
     )
 
     assert result["uri"] == CREATED_URI
@@ -100,10 +108,14 @@ async def test_create_requirement_successful_reread_has_no_warning():
     respx.get(CREATED_URI).mock(return_value=httpx.Response(200, text=CREATED_RDF))
 
     result = await server.create_requirement(
-        project=PROJECT, title="New Requirement", content="<p>x</p>", type=SHAPE_REQ
+        project=PROJECT,
+        title="New Requirement",
+        content="<p>x</p>",
+        type=SHAPE_REQ,
+        if_exists="create",
     )
 
-    assert result == {"uri": CREATED_URI, "identifier": "42"}
+    assert result == {"uri": CREATED_URI, "identifier": "42", "created": True}
 
 
 # ======================================================================

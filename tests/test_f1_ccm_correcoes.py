@@ -380,7 +380,7 @@ def _posted_body() -> str:
 async def test_d6_create_workitem_owner_goes_to_dcterms_contributor():
     """D6 EARS-3: owner in create -> <dcterms:contributor rdf:resource=…/users/jdoe/>; no ownedBy anywhere."""
     _setup_create()
-    await create_workitem(project=PROJECT, title="T", type="task", owner="jdoe")
+    await create_workitem(project=PROJECT, title="T", type="task", owner="jdoe", if_exists="create")
     body = _posted_body()
     assert _contributor_uris(body) == [f"{BASE}/jts/users/jdoe"]
     assert "ownedBy" not in body
@@ -390,7 +390,7 @@ async def test_d6_create_workitem_owner_goes_to_dcterms_contributor():
 async def test_d6_create_workitem_owner_is_url_quoted():
     """D6: owner is quoted like update_workitem does (space -> %20), keeping the XML attribute valid."""
     _setup_create()
-    await create_workitem(project=PROJECT, title="T", type="task", owner="j doe")
+    await create_workitem(project=PROJECT, title="T", type="task", owner="j doe", if_exists="create")
     assert _contributor_uris(_posted_body()) == [f"{BASE}/jts/users/j%20doe"]
 
 
@@ -398,7 +398,7 @@ async def test_d6_create_workitem_owner_is_url_quoted():
 async def test_d6_create_workitem_without_owner_has_no_contributor_nor_ownedby():
     """D6 negative: no owner -> neither dcterms:contributor nor rtc_cm:ownedBy in the body."""
     _setup_create()
-    await create_workitem(project=PROJECT, title="T", type="task")
+    await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     body = _posted_body()
     assert _contributor_uris(body) == []
     assert "ownedBy" not in body
@@ -408,7 +408,7 @@ async def test_d6_create_workitem_without_owner_has_no_contributor_nor_ownedby()
 async def test_d6_add_child_workitem_owner_goes_to_dcterms_contributor():
     """D6: add_child_workitem delegates to create_workitem -> same owner mapping, parent link kept."""
     _setup_create()
-    await add_child_workitem(parent_id="10", title="Child", project=PROJECT, owner="jdoe")
+    await add_child_workitem(parent_id="10", title="Child", project=PROJECT, owner="jdoe", if_exists="create")
     body = _posted_body()
     assert _contributor_uris(body) == [f"{BASE}/jts/users/jdoe"]
     assert "ownedBy" not in body
@@ -424,7 +424,7 @@ async def test_d9_create_workitem_posts_to_the_type_factory(type_arg):
     """D9 EARS-4: POST goes to …/workitems/{type id}, as RDF/XML; the generic factory is untouched."""
     type_id = {"task": "task", "story": STORY_ID}[type_arg]
     _, typed, generic = _setup_create(type_id)
-    result = await create_workitem(project=PROJECT, title="T", type=type_arg)
+    result = await create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
     assert result["dcterms:identifier"] == "42"
     assert typed.call_count == 1
     assert generic.call_count == 0
@@ -461,7 +461,7 @@ async def test_d9_server_403_with_oslc_message_becomes_toolerror_without_reauth_
     auth, typed, generic = _setup_create()
     typed.mock(return_value=httpx.Response(403, json={"oslc:message": SERVER_MESSAGE}))
     with pytest.raises(ToolError) as exc:
-        await create_workitem(project=PROJECT, title="T", type="task")
+        await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert SERVER_MESSAGE in str(exc.value)
     assert typed.call_count == 1
     assert generic.call_count == 0
@@ -474,7 +474,7 @@ async def test_d9_server_409_with_oslc_message_becomes_toolerror():
     _, typed, _ = _setup_create()
     typed.mock(return_value=httpx.Response(409, json={"oslc:message": "Unknown attribute foo"}))
     with pytest.raises(ToolError, match="Unknown attribute foo"):
-        await create_workitem(project=PROJECT, title="T", type="task")
+        await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
 
 
 @respx.mock
@@ -482,7 +482,7 @@ async def test_d9_401_reauthenticates_once_and_resends_to_the_type_factory():
     """D9 / decision 'Retry': 401 -> re-authenticate exactly once and re-POST to the type factory."""
     auth, typed, generic = _setup_create()
     typed.mock(side_effect=[httpx.Response(401, text="Unauthorized"), httpx.Response(201, json=CREATED)])
-    result = await create_workitem(project=PROJECT, title="T", type="task")
+    result = await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert result["dcterms:identifier"] == "42"
     assert typed.call_count == 2
     assert generic.call_count == 0
@@ -732,10 +732,9 @@ def _categories_calls() -> list:
     return [c for c in respx.calls if CATEGORIES_PATH in str(c.request.url)]
 
 
-def _shape_calls(type_id: str) -> list:
-    """GETs on the type shape or its allowedValues (what the removed default lookup used)."""
-    base = f.shape_uri(type_id)
-    return [c for c in respx.calls if c.request.method == "GET" and str(c.request.url).startswith(base)]
+def _allowed_values_calls(type_id: str) -> list:
+    """GETs on the allowedValues of the type's category property (what the removed default lookup read)."""
+    return [c for c in respx.calls if c.request.method == "GET" and str(c.request.url) == f.allowed_values_url(type_id)]
 
 
 @pytest.mark.parametrize("type_arg", ["task", "story"])
@@ -745,7 +744,7 @@ async def test_d13_create_workitem_without_filed_against_omits_the_property(type
     even though the type shape carries a defaultValue."""
     type_id = {"task": "task", "story": STORY_ID}[type_arg]
     _setup_create(type_id)
-    await create_workitem(project=PROJECT, title="T", type=type_arg)
+    await create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
     body = _posted_body()
     assert "filedAgainst" not in body
     assert _filed_against_uris(body) == []
@@ -754,12 +753,14 @@ async def test_d13_create_workitem_without_filed_against_omits_the_property(type
 @pytest.mark.parametrize("type_arg", ["task", "story"])
 @respx.mock
 async def test_d13_create_workitem_without_filed_against_does_not_look_up_a_category(type_arg):
-    """D13: no categories route call, no shape/allowedValues read for a default category."""
+    """D13: no categories route call and no default category taken from the shape (W4: the shape is now read only
+    to list missing required fields, never to fill filedAgainst)."""
     type_id = {"task": "task", "story": STORY_ID}[type_arg]
     _setup_create(type_id)
-    await create_workitem(project=PROJECT, title="T", type=type_arg)
+    await create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
     assert _categories_calls() == []
-    assert _shape_calls(type_id) == []
+    assert _allowed_values_calls(type_id) == []
+    assert "filedAgainst" not in _posted_body()
     assert "_OTHERPA" not in _posted_body()
 
 
@@ -767,10 +768,10 @@ async def test_d13_create_workitem_without_filed_against_does_not_look_up_a_cate
 async def test_d13_create_workitem_explicit_filed_against_is_sent_as_is():
     """D13: explicit filed_against goes out unchanged (not the shape default), no category lookup."""
     _setup_create("task")
-    await create_workitem(project=PROJECT, title="T", type="task", filed_against=f.CAT_2)
+    await create_workitem(project=PROJECT, title="T", type="task", filed_against=f.CAT_2, if_exists="create")
     assert _filed_against_uris(_posted_body()) == [f.CAT_2]
     assert _categories_calls() == []
-    assert _shape_calls("task") == []
+    assert _allowed_values_calls("task") == []
 
 
 @respx.mock
@@ -780,7 +781,7 @@ async def test_d13_category_refusal_toolerror_has_server_message_and_list_fields
     _auth, typed, _generic = _setup_create("task")
     typed.mock(return_value=httpx.Response(403, json={"oslc:message": CATEGORY_ERROR_MESSAGE}))
     with pytest.raises(ToolError) as exc:
-        await create_workitem(project=PROJECT, title="T", type="task")
+        await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     text = str(exc.value)
     assert CATEGORY_ERROR_MESSAGE in text
     assert "list_fields" in text
@@ -793,7 +794,7 @@ async def test_d13_non_category_refusal_has_no_list_fields_hint():
     _, typed, _ = _setup_create("task")
     typed.mock(return_value=httpx.Response(403, json={"oslc:message": SERVER_MESSAGE}))
     with pytest.raises(ToolError) as exc:
-        await create_workitem(project=PROJECT, title="T", type="task")
+        await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert SERVER_MESSAGE in str(exc.value)
     assert "list_fields" not in str(exc.value)
 
@@ -829,7 +830,7 @@ async def test_g5l2_create_403_without_oslc_message_reauthenticates_and_resends_
     """G5 L2 item 3: 403 sem oslc:message (CSRF/sessão obsoleta) -> reautentica e reenvia UMA vez."""
     auth, typed, _ = _setup_create()
     typed.mock(side_effect=[httpx.Response(403, text="Forbidden"), httpx.Response(201, json=CREATED)])
-    result = await create_workitem(project=PROJECT, title="T", type="task")
+    result = await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert result["dcterms:identifier"] == "42"
     assert typed.call_count == 2
     assert auth.call_count == 2
@@ -852,7 +853,7 @@ async def test_g5l2_create_403_with_oslc_message_does_not_reauthenticate():
     auth, typed, _ = _setup_create()
     typed.mock(return_value=httpx.Response(403, json={"oslc:message": SERVER_MESSAGE}))
     with pytest.raises(ToolError, match="Preconditions"):
-        await create_workitem(project=PROJECT, title="T", type="task")
+        await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert typed.call_count == 1
     assert auth.call_count == 1
 
@@ -861,7 +862,7 @@ async def test_g5l2_create_403_with_oslc_message_does_not_reauthenticate():
 async def test_g5l2_create_owner_path_traversal_is_fully_quoted():
     """G5 L2 item 4: owner 'jdoe/../admin' -> %2F no URI (sem separador de caminho)."""
     _setup_create()
-    await create_workitem(project=PROJECT, title="T", type="task", owner="jdoe/../admin")
+    await create_workitem(project=PROJECT, title="T", type="task", owner="jdoe/../admin", if_exists="create")
     assert _contributor_uris(_posted_body()) == [f"{BASE}/jts/users/jdoe%2F..%2Fadmin"]
 
 
