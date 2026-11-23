@@ -351,25 +351,28 @@ def _qname(tag: str, prefixes: dict[str, str]) -> str:
     return f"{prefix}:{local}" if prefix else local
 
 
-def _serialize_literal(prop: ET.Element, prefixes: dict[str, str]) -> str:
+def _child_to_xml(child: ET.Element) -> str:
+    """Serialize one element with the stdlib writer; XHTML keeps a default ``xmlns`` (no ``ns0:`` prefixes)."""
+    try:
+        return ET.tostring(child, encoding="unicode", default_namespace=_XHTML_NS, short_empty_elements=True)
+    except ValueError:  # content outside the XHTML namespace: use the standard prefixed output
+        return ET.tostring(child, encoding="unicode", short_empty_elements=True)
+
+
+def _serialize_literal(prop: ET.Element) -> str:
     """Serialize the content of a ``rdf:parseType="Literal"`` element from the already parsed tree.
 
-    Top-level XHTML elements get ``xmlns="http://www.w3.org/1999/xhtml"``; nested XHTML elements are
-    written without prefix. Other namespaces use the prefix declared in the document.
+    Uses ``ET.tostring`` per child; text and tails are XML-escaped, so empty elements,
+    namespaces and ``xml:lang`` come out as well-formed XML. Excessive nesting raises ``ValueError``.
     """
-
-    def render(el: ET.Element, parent_ns: str) -> str:
-        ns_uri = el.tag[1:].partition("}")[0] if el.tag.startswith("{") else ""
-        name = el.tag.partition("}")[2] if ns_uri == _XHTML_NS else _qname(el.tag, prefixes)
-        attrs = "".join(f' {_qname(k, prefixes)}="{_xml_escape(v, {chr(34): "&quot;"})}"' for k, v in el.attrib.items())
-        if ns_uri == _XHTML_NS and parent_ns != _XHTML_NS:
-            attrs = f' xmlns="{_XHTML_NS}"' + attrs
-        inner = _xml_escape(el.text or "") + "".join(
-            render(child, ns_uri) + _xml_escape(child.tail or "") for child in el
-        )
-        return f"<{name}{attrs}>{inner}</{name}>"
-
-    return (_xml_escape(prop.text or "") + "".join(render(c, "") + _xml_escape(c.tail or "") for c in prop)).strip()
+    try:
+        parts = [_xml_escape(prop.text or "")]
+        for child in prop:
+            parts.append(_child_to_xml(child))
+            parts.append(_xml_escape(child.tail or ""))
+    except RecursionError as exc:
+        raise ValueError("invalid RDF/XML response: nesting too deep") from exc
+    return "".join(parts).strip()
 
 
 def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
@@ -411,7 +414,7 @@ def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
         if prop.get(f"{{{rdf_ns}}}resource") is not None:
             value = prop.get(f"{{{rdf_ns}}}resource")
         elif prop.get(f"{{{rdf_ns}}}parseType") == "Literal":
-            value = _serialize_literal(prop, prefixes)
+            value = _serialize_literal(prop)
         else:
             value = prop.text or ""
         if key in result:
