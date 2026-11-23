@@ -13,8 +13,10 @@ src/elm_mcp/
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
+├── hours.py          # Time sheet reading: list_time, get_hours (ms -> h, 8 concurrent reads)
+├── attachments.py    # Attachment metadata and local download (Accept */*, size cap, base name only)
 ├── qm.py             # ETM (QM) reading: capability by resourceType, RDF/XML pages, coverage, results
-└── server.py         # MCP server with 31 tools (18 read-only, 13 write)
+└── server.py         # MCP server with 35 tools (22 read-only, 13 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking

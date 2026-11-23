@@ -1,6 +1,6 @@
 # Tools reference
 
-The thirty-one MCP tools exposed today (eighteen read-only, thirteen write). All are async and validated through the `@tool` boundary
+The thirty-five MCP tools exposed today (twenty-two read-only, thirteen write). All are async and validated through the `@tool` boundary
 (invalid input or domain failures surface as `ToolError`). `domain` is one of `rm`, `ccm`, `qm`.
 See `docs/USAGE.md` for query syntax and examples.
 
@@ -22,6 +22,10 @@ See `docs/USAGE.md` for query syntax and examples.
 | `list_comments`     | `(id)` | Comments of a work item (`oslc:discussedBy` -> `oslc:comment`), in thread order: `[{"id", "author", "created", "text"}]`. An item without discussion returns `[]`. |
 | `list_workflow`     | `(project, type, refresh=False)` | Workflow of a work item type (`type` as in `create_workitem`): `{"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}`. The action ids are what `transition_workitem` accepts. `refresh=true` ignores the discovery cache. A type whose shape does not expose its workflow is an error. |
 | `get_plan_items`    | `(project, plan=None, item_ids=None)` | Hierarchical view: backlog items with child tasks expanded in one call. Select by `plan` (iteration title substring) or `item_ids`. The result carries `truncated` (true when the backlog query had more than 1000 items). |
+| `list_time`         | `(id)` | Time sheet entries of a work item: `{"id", "entries": [{entry_uri, person, date, hours, time_code}], "total_hours"}`. The server keeps time in milliseconds; hours have 2 decimals and null time is 0. `person` is the `dcterms:creator` URI. An item without sheet or entries returns `[]`. |
+| `get_hours`         | `(item_ids=None, plan=None, project=None, group_by="person", max_entries=500)` | Hours of work items plus their direct children (the selection of `get_plan_items`; `project` is only needed with `plan`), read from the time sheets with at most 8 requests at a time. `group_by="person"` sums per creator; `"item"` sums per work item with `estimate_hours` and, for an item with `timeSpent` but no entries, uses its `timeSpent` and marks `without_entries`. Returns `groups`, `total_hours`, `items_counted`, `entries_read`, `partial`, `unread_entries`, `items_without_entries`, `errors` (`[{entry_uri, error}]`, left out of the totals) and `truncated`. Above `max_entries` it stops reading and returns the partial result without error. An invalid `group_by` or `max_entries < 1` is refused. |
+| `list_attachments`  | `(id)` | Attachments of a work item: `[{uri, name, identifier, format, creator, created}]` (`size` when the server reports it). `name` has no `<id>: ` prefix. Only metadata is read. |
+| `download_attachment` | `(id, attachment, dest, overwrite=False)` | Saves one attachment to a **local** file; it never writes to the ALM (the tool only sends GET requests, hence `readOnlyHint`). `attachment` is the identifier, the exact name or the URI; `dest` is an existing directory (the file takes the server's name, base name only: `../` and `/` are dropped) or a file path. The content is requested with `Accept: */*` (other types answer 406). An existing file is refused unless `overwrite=True`. The size is capped by `ELM_MAX_DOWNLOAD_MB` (default 50); a refused or failed download leaves no file. Returns `{"path", "size"}`. |
 
 ## Discovery
 
@@ -83,6 +87,7 @@ the `Authorization` header never appear in the message.
   that vary per project area. Use `list_types` → `list_fields` (and `list_folders` for RM, or
   `inspect_workitem` to copy a real item's values) first. Nothing about a specific organization is
   baked into the package (see `docs/ARCHITECTURE.md`, core vs adaptation).
+- `ELM_MAX_DOWNLOAD_MB` (default 50) caps `download_attachment`.
 - Discovery (provider, factories, shapes, allowedValues, workflow, RM stream) is cached in memory per server and project area for `ELM_CACHE_TTL` seconds (default 300; a negative, `nan` or infinite value also means 300; `0` turns it off, read on every call); nothing about credentials or cookies is stored. `refresh=true` on `list_types`, `list_fields` and `list_workflow` reloads it.
 - Local profile (ADR-005): plain JSON outside the package, in `ELM_MCP_PROFILE_DIR` (default `~/.elm-mcp/profiles/`): `templates/<name>.json` and `project-areas/<project area id>.json` (`"template": "<name>"` inside). Keys: `defaults.<type id>` (`{"rtc_cm:filedAgainst": {"rdf:resource": "..."}}`, values as in `custom_fields`), `action_aliases`, `hidden_states`. The template applies first, the project area over it: dicts merge key by key, lists and scalars of the project area replace. `elm-mcp profile draft <project>` prints a draft (required fields per type with `null` to fill, allowed values under `_review`) from read-only discovery.
 - `create_requirement` requires `type`: pass the `shape_uri` or the title from `list_types` on the `rm` domain.
