@@ -10,7 +10,8 @@ the format is defined here, by ``build_contract``):
 
     {"tools": [{"name": str,
                 "read_only": bool,
-                "parameters": [{"name": str, "type": str, "required": bool}, ...]}, ...]}
+                "parameters": [{"name": str, "type": str, "required": bool, "default": any (only when
+                                the parameter declares one)}, ...]}, ...]}
 
 - tools sorted by name, parameters kept in declaration order;
 - ``type`` is the JSON Schema type; ``anyOf`` is rendered as the sorted types joined
@@ -26,6 +27,7 @@ adding a required parameter, makes the comparison fail.
 
 import asyncio
 import copy
+import importlib.util
 import json
 import subprocess
 import sys
@@ -39,6 +41,18 @@ from elm_mcp.server import mcp
 ROOT = Path(__file__).resolve().parent.parent
 SNAPSHOT = ROOT / "tests" / "contract" / "tools.snapshot.json"
 UPDATE_SCRIPT = ROOT / "scripts" / "update_contract.py"
+
+
+def _load_update_script():
+    """Import scripts/update_contract.py (scripts/ is not a package): single source of build_contract."""
+    spec = importlib.util.spec_from_file_location("update_contract", UPDATE_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_update_contract = _load_update_script()
+build_contract = _update_contract.build_contract
 
 # Tools that must be flagged read-only in the snapshot; every other tool writes.
 READ_ONLY_TOOLS = {
@@ -74,34 +88,6 @@ def no_network(monkeypatch):
         raise AssertionError("the contract test must not use the network")
 
     monkeypatch.setattr(httpx.AsyncClient, "send", _blocked)
-
-
-def _param_type(schema: dict) -> str:
-    if "anyOf" in schema:
-        return "|".join(sorted(_param_type(s) for s in schema["anyOf"]))
-    kind = schema.get("type", "any")
-    if kind == "array" and "items" in schema:
-        return f"array[{_param_type(schema['items'])}]"
-    return kind
-
-
-async def build_contract() -> dict:
-    """Contract of the tools really registered on the server (no network)."""
-    tools = []
-    for tool in sorted(await mcp.list_tools(), key=lambda t: t.name):
-        schema = tool.input_schema or {}
-        required = set(schema.get("required", []))
-        tools.append(
-            {
-                "name": tool.name,
-                "read_only": bool(tool.annotations and tool.annotations.read_only_hint),
-                "parameters": [
-                    {"name": name, "type": _param_type(prop), "required": name in required}
-                    for name, prop in schema.get("properties", {}).items()
-                ],
-            }
-        )
-    return {"tools": tools}
 
 
 def diff_contracts(expected: dict, actual: dict) -> list[str]:
@@ -150,7 +136,7 @@ async def test_snapshot_records_name_type_and_required_for_every_parameter():
     params = {p["name"]: p for p in by_name["create_requirement"]["parameters"]}
     assert params["project"] == {"name": "project", "type": "string", "required": True}
     assert params["title"] == {"name": "title", "type": "string", "required": True}
-    assert params["type"] == {"name": "type", "type": "null|string", "required": False}
+    assert params["type"] == {"name": "type", "type": "null|string", "required": False, "default": None}
 
 
 # ======================================================================
@@ -230,24 +216,30 @@ def test_update_script_exists():
     assert UPDATE_SCRIPT.is_file(), "scripts/update_contract.py is the documented regeneration command"
 
 
-async def test_update_script_regenerates_a_snapshot_the_comparison_accepts():
-    """FAILS today: the script is missing. Running it must write a snapshot equal to the real tools."""
+async def test_update_script_regenerates_a_snapshot_the_comparison_accepts(tmp_path):
+    """The script writes to the path given as argument (never the real snapshot) and the result matches the tools."""
     assert UPDATE_SCRIPT.is_file(), "scripts/update_contract.py is the documented regeneration command"
-    original = SNAPSHOT.read_bytes() if SNAPSHOT.exists() else None
-    try:
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            [sys.executable, str(UPDATE_SCRIPT)],
-            check=False,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert proc.returncode == 0, proc.stderr
-        assert diff_contracts(_load_snapshot(), await build_contract()) == []
-    finally:
-        if original is None:
-            SNAPSHOT.unlink(missing_ok=True)
-        else:
-            SNAPSHOT.write_bytes(original)
+    real_before = SNAPSHOT.read_bytes()
+    target = tmp_path / "tools.snapshot.json"
+    proc = await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, str(UPDATE_SCRIPT), str(target)],
+        check=False,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert diff_contracts(json.loads(target.read_text(encoding="utf-8")), await build_contract()) == []
+    assert SNAPSHOT.read_bytes() == real_before, "the regeneration test must not touch the real snapshot"
+
+
+async def test_snapshot_records_the_default_value_of_parameters():
+    """A changed default (e.g. folder=None -> 'x') is a contract change and must show in the diff."""
+    by_name = {t["name"]: t for t in _load_snapshot()["tools"]}
+    params = {p["name"]: p for p in by_name["create_requirement"]["parameters"]}
+    assert params["type"] == {"name": "type", "type": "null|string", "required": False, "default": None}
+    assert "default" not in params["project"], "required parameters carry no default"
+    mutated = _mutated(_load_snapshot(), lambda s: _tool(s, "create_requirement")["parameters"][-1].update(default="x"))
+    assert any("create_requirement" in p for p in diff_contracts(mutated, await build_contract()))
