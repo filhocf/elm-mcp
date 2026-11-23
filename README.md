@@ -67,6 +67,16 @@ URLs of its responses). The client only follows URLs, and redirects, on that ori
 another host name (internal name, http vs https, different port) makes calls fail with "outside the configured
 ELM server". Redirects are checked before being followed, so a 302 to another host is refused.
 
+Optional settings: `ELM_CACHE_TTL` (seconds of the in-memory discovery cache, default 300, `0` turns it off) and
+`ELM_MCP_PROFILE_DIR` (directory of the local profile, default `~/.elm-mcp/profiles/`). To start a profile from the
+discovery of a project (read-only, JSON on stdout):
+
+```bash
+elm-mcp profile draft "MY PROJECT (KEY)" > ~/.elm-mcp/profiles/project-areas/<project area id>.json
+```
+
+Review the draft before using it; see `docs/TOOLS.md` for the profile format.
+
 ### Register with your MCP client
 
 ```json
