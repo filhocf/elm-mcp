@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:oslc="http://open-services.net/ns/core#" xmlns:dcterms="http://purl.org/dc/terms/">
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestExecutionRecord</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.TestcaseExecutionRecord"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.execution.TestcaseExecutionRecord"/>
+                        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestExecutionRecord"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestSuiteResult</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.ExecutionResultGroup"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.execution.ExecutionResultGroup"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#TestSuiteResult"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestSuiteExecutionRecord</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.TestSuiteExecutionRecord"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.execution.TestSuiteExecutionRecord"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#TestSuiteExecutionRecord"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestPlan</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestPlan"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.planning.VersionedTestPlan"/>
+                        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestPlan"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for Keyword</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.keyword.Keyword"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.keyword.Keyword"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#Keyword"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestData</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.datapool.Datapool"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.datapool.Datapool"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#TestData"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestCase</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.planning.VersionedTestCase"/>
+                        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestCase"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestScript</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedExecutionScript"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.planning.VersionedExecutionScript"/>
+                        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestScript"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for BuildRecord</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.buildintegration.BuildRecord"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.buildintegration.BuildRecord"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#BuildRecord"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestSuite</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestSuite"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.planning.VersionedTestSuite"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#TestSuite"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for TestResult</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.ExecutionResult"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.execution.ExecutionResult"/>
+                        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestResult"/>
+                    </oslc:CreationFactory>
+<oslc:CreationFactory>
+                        <dcterms:title>Default creation factory for BuildDefinition</dcterms:title>
+                        <oslc:creation rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.buildintegration.BuildDefinition"/>
+                        <oslc:resourceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/creation/com.ibm.rqm.buildintegration.BuildDefinition"/>
+                        <oslc:resourceType rdf:resource="http://jazz.net/ns/qm/rqm#BuildDefinition"/>
+                    </oslc:CreationFactory>
+</rdf:RDF>
