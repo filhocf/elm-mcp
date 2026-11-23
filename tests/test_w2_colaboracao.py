@@ -83,7 +83,8 @@ async def test_new_tool_is_registered_with_the_agreed_required_parameters(name, 
     tools = await _registered()
     assert name in tools, f"tool not registered: {name}"
     schema = tools[name].input_schema or {}
-    assert list(schema.get("properties", {})) == params
+    # W4: ``refresh`` is an optional discovery-cache switch (never required)
+    assert [p for p in schema.get("properties", {}) if p != "refresh"] == params
     assert set(schema.get("required", [])) == set(params)
     hint = tools[name].annotations.read_only_hint if tools[name].annotations else None
     assert bool(hint) is read_only
