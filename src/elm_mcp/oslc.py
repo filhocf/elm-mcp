@@ -1885,3 +1885,41 @@ async def list_workflow(project: str, type: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------------------------
+# list_workitems filters (oslc.where). Property names follow the real work item
+# (dcterms:type = type title, oslc_cm:status = state title, dcterms:contributor = user URI,
+# rtc_cm:plannedFor = iteration URI); that the query service accepts each one in oslc.where is
+# to be confirmed in live acceptance.
+# ---------------------------------------------------------------------------------------------
+def _safe_filter_value(name: str, value: str) -> str:
+    value = str(value).strip()
+    if not value:
+        raise ValueError(f"Filter '{name}' must not be empty.")
+    if any(c in value for c in '"<>\\') or any(c.isspace() and c != " " for c in value):
+        raise ValueError(f"Filter '{name}' has a forbidden character (quote, angle bracket or backslash): {value!r}")
+    return value
+
+
+def _is_uri(value: str) -> bool:
+    return value.startswith(("http://", "https://")) and " " not in value
+
+
+def workitem_filters(
+    type: str | None = None, state: str | None = None, owner: str | None = None, planned_for: str | None = None
+) -> list[str]:
+    """oslc.where clauses of the list_workitems filters (validated against clause injection)."""
+    clauses: list[str] = []
+    if type is not None:
+        clauses.append(f'dcterms:type="{_safe_filter_value("type", type)}"')
+    if state is not None:
+        clauses.append(f'oslc_cm:status="{_safe_filter_value("state", state)}"')
+    if owner is not None:
+        owner = _safe_filter_value("owner", owner)
+        user = owner if _is_uri(owner) else f"{settings.elm_url}/jts/users/{_quote_segment(owner)}"
+        clauses.append(f"dcterms:contributor=<{user}>")
+    if planned_for is not None:
+        planned_for = _safe_filter_value("planned_for", planned_for)
+        if not _is_uri(planned_for):
+            raise ValueError(f"planned_for must be an iteration URI (see list_iterations), got {planned_for!r}")
+        clauses.append(f"rtc_cm:plannedFor=<{planned_for}>")
+    return clauses

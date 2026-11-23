@@ -80,12 +80,30 @@ async def get_requirement(uri: str) -> dict:
 
 
 @read_tool
-async def list_workitems(project: str, query: str | None = None, limit: int | None = None) -> dict:
+async def list_workitems(
+    project: str,
+    query: str | None = None,
+    limit: int | None = None,
+    type: str | None = None,
+    state: str | None = None,
+    owner: str | None = None,
+    planned_for: str | None = None,
+) -> dict:
     """Search work items in an RTC project. Query uses oslc.where syntax.
+
+    Optional filters, applied by the server and combined with `query` using "and":
+        type: work item type title (dcterms:type, e.g. "Task")
+        state: state title (oslc_cm:status, e.g. "In Progress")
+        owner: user id (e.g. "jdoe") or user URI (dcterms:contributor)
+        planned_for: iteration URI (rtc_cm:plannedFor, see list_iterations)
+    A filter value with a double quote, angle bracket or backslash is refused.
 
     Follows the server's pages until `limit` items (default 50, maximum 1000).
     Returns {"items": [...], "truncated": bool}; truncated=True means the query has more items.
     """
+    clauses = [query] if query else []
+    clauses += oslc.workitem_filters(type=type, state=state, owner=owner, planned_for=planned_for)
+    query = " and ".join(clauses) or None
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
     results = await oslc.query_resources("ccm", project, query, select=select, limit=limit)
     parsed = []
