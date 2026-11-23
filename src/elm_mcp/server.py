@@ -257,7 +257,7 @@ async def create_workitem(
         description: HTML description (optional)
         parent_id: Parent work item ID (optional)
         owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
-        filed_against: Category URI (optional). If not provided, uses the default of the type's shape (first allowed value if none).
+        filed_against: Category URI (optional). If not provided, the property is not sent and the server applies its own default. Valid values: list_fields (property filedAgainst, allowedValues).
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
     if type not in TYPE_IDS:
@@ -277,8 +277,6 @@ async def create_workitem(
         ]
     if owner:
         payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner)}"}
-    if not filed_against:
-        filed_against = await oslc._find_default_category(project_url, type)
     if filed_against:
         payload["rtc_cm:filedAgainst"] = {"rdf:resource": filed_against}
     # Auto-discover current iteration

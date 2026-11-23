@@ -229,30 +229,6 @@ async def get_resource(uri: str) -> dict:
     return await _get_json(client, uri)
 
 
-async def _find_default_category(project_url: str, wi_type: str) -> str | None:
-    """Default category (filedAgainst) for a work item type, read from the type's shape.
-
-    The `oslc:defaultValue` of the property whose propertyDefinition ends in /filedAgainst;
-    without a default, the first `oslc:allowedValues` entry. None when the shape has no such property.
-    (The /ccm/oslc/categories route ignores the project filter and is not used.)
-    """
-    factories = await _list_ccm_creation_factories(project_url)
-    shape_uri = _resolve_ccm_type(factories, wi_type)["shape_uri"]
-    if not shape_uri:
-        return None
-    for p in await list_shape_properties(shape_uri):
-        if not (p["property_uri"] or "").endswith("/filedAgainst"):
-            continue
-        if p["default_value"]:
-            return p["default_value"]
-        if p["allowed_values_uri"]:
-            values = await list_allowed_values(p["allowed_values_uri"])
-            if values:
-                return values[0]["value_uri"]
-        return None
-    return None
-
-
 async def _find_current_iteration(project_url: str) -> str | None:
     """Discover the current iteration (plannedFor) for a CCM project area.
 
@@ -357,7 +333,10 @@ def _raise_write_error(resp: httpx.Response) -> None:
     """
     message = _write_message(resp)
     if message:
-        raise ValueError(f"Server refused the write ({resp.status_code}): {message}")
+        hint = ""
+        if _re.search(r"filed\s*against|categor", message, _re.IGNORECASE):
+            hint = " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
+        raise ValueError(f"Server refused the write ({resp.status_code}): {message}{hint}")
     resp.raise_for_status()
     raise RuntimeError(f"Unexpected response status {resp.status_code}")
 

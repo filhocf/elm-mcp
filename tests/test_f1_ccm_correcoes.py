@@ -777,7 +777,7 @@ async def test_d13_create_workitem_explicit_filed_against_is_sent_as_is():
 async def test_d13_category_refusal_toolerror_has_server_message_and_list_fields_hint():
     """D13: 403 with an oslc:message about the category -> ToolError carries the server text
     and points to list_fields (filedAgainst); single POST, no retry."""
-    auth, typed, generic = _setup_create("task")
+    _auth, typed, _generic = _setup_create("task")
     typed.mock(return_value=httpx.Response(403, json={"oslc:message": CATEGORY_ERROR_MESSAGE}))
     with pytest.raises(ToolError) as exc:
         await create_workitem(project=PROJECT, title="T", type="task")

@@ -31,10 +31,8 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
   changed properties (`?oslc.properties=...`) with `If-Match`, returns the re-read item, and reports a stale
   ETag (412) as a conflict.
 
-- **D13** `create_workitem` without `filed_against` failed with HTTP 500 (`Child team area is not part of this team
-  area hierarchy`): the category came from `/ccm/oslc/categories`, which ignores the project filter. The default is now
-  the `oslc:defaultValue` of the `filedAgainst` property in the shape of the type, or the first `oslc:allowedValues`
-  entry when there is no default. `/ccm/oslc/categories` is no longer called.
+- **D13** `create_workitem` without `filed_against` no longer sends a category (the server applies its own default) and
+  no longer looks one up; a refusal about the category now adds a hint to use `list_fields` (property `filedAgainst`).
 
 ### Changed
 
