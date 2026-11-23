@@ -25,11 +25,14 @@ _STALE_SHAPE_STATUSES = (400, 409)
 _T = TypeVar("_T")
 
 
-def _register(func: Callable[..., Awaitable[_T]], read_only: bool) -> Callable[..., Awaitable[_T]]:
+def _register(
+    func: Callable[..., Awaitable[_T]], read_only: bool, destructive: bool | None = None
+) -> Callable[..., Awaitable[_T]]:
     """Register an async MCP tool, translating domain errors into ToolError.
 
     ``read_only`` is published as the MCP ``readOnlyHint`` annotation (part of the versioned
-    contract in tests/contract/tools.snapshot.json).
+    contract in tests/contract/tools.snapshot.json). ``destructive`` is the ``destructiveHint`` (only
+    meaningful for a write tool; None leaves it unset).
 
     OSLC/discovery failures surface from oslc.py as ValueError/RuntimeError
     (e.g. "Project not found", "No query capability found"). Without this wrap
@@ -48,7 +51,8 @@ def _register(func: Callable[..., Awaitable[_T]], read_only: bool) -> Callable[.
         except (ValueError, RuntimeError) as exc:
             raise ToolError(str(exc)) from exc
 
-    return mcp.tool(annotations=ToolAnnotations(readOnlyHint=read_only))(wrapper)
+    annotations = ToolAnnotations(readOnlyHint=read_only, destructiveHint=destructive)
+    return mcp.tool(annotations=annotations)(wrapper)
 
 
 def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
@@ -59,6 +63,14 @@ def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
 def read_tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
     """Register a READ-ONLY tool (readOnlyHint=True)."""
     return _register(func, read_only=True)
+
+
+def local_write_tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+    """Register a tool that never writes to the ALM but can create or replace a LOCAL file.
+
+    It is NOT read only (clients must ask before running it) and is flagged destructive (it can overwrite).
+    """
+    return _register(func, read_only=False, destructive=True)
 
 
 @read_tool
@@ -397,12 +409,15 @@ async def get_hours(
         plan: iteration title substring (needs `project`), as in get_plan_items
         project: project name; only needed with `plan`
         group_by: "person" (sum per `dcterms:creator`) or "item" (sum per work item, with `estimate_hours`)
-        max_entries: ceiling of sheet entries read in all (default 500, at least 1)
+        max_entries: ceiling of sheet entries read in all (default 500, from 1 to 5000)
 
+    Cost: 2N+1 GETs for N work items (item + sheet each, plus one for the first read of the selection) and
+    one GET per entry read, so up to 5000 entries. An entry listed by two items is read and counted once.
     Entries are read with at most 8 requests at a time. Returns {"group_by", "groups", "total_hours",
     "items_counted", "entries_read", "partial", "unread_entries", "items_without_entries", "errors",
-    "truncated"}. Above `max_entries` the reading stops and `partial` is true with `unread_entries`. An entry
-    that cannot be read goes to `errors` (`{"entry_uri", "error"}`) and is left out of the totals. In "item"
+    "truncated"}. `partial` is true when `max_entries` left entries unread (`unread_entries`) or when an entry
+    failed to read. An entry that cannot be read goes to `errors` (`{"entry_uri", "error"}`) and is left out
+    of the totals. In "item"
     mode a work item with `timeSpent` but no entries uses its `timeSpent` and is marked `without_entries`.
     Read only.
     """
@@ -410,6 +425,8 @@ async def get_hours(
         raise ToolError(f"Invalid group_by '{group_by}'. Must be one of: {hours.GROUP_BY}")
     if isinstance(max_entries, bool) or not isinstance(max_entries, int) or max_entries < 1:
         raise ToolError("max_entries must be an integer >= 1")
+    if max_entries > hours.MAX_ENTRIES_CEILING:
+        raise ToolError(f"max_entries must be at most {hours.MAX_ENTRIES_CEILING}")
     if not item_ids and not plan:
         raise ToolError("Provide either 'item_ids' (work item IDs) or 'plan' (iteration name, with 'project')")
     if not item_ids and not project:
@@ -437,7 +454,7 @@ async def list_attachments(id: str) -> list[dict]:
     return await attachments.list_attachments(id)
 
 
-@read_tool
+@local_write_tool
 async def download_attachment(id: str, attachment: str, dest: str, overwrite: bool = False) -> dict:
     """Download an attachment of a work item to a LOCAL file; it never writes to the ALM.
 
@@ -447,8 +464,12 @@ async def download_attachment(id: str, attachment: str, dest: str, overwrite: bo
         dest: an existing directory (the file takes the server's name, base name only) or a file path
         overwrite: replace an existing file (default False: an existing file is refused)
 
-    The size is capped by ELM_MAX_DOWNLOAD_MB (default 50); a refused or failed download leaves no file.
-    Returns {"path", "size"}. The tool is read only toward the ALM (it only issues GET requests).
+    Writes a LOCAL file with content from the ALM, so it is NOT a read-only tool and `overwrite=True` can
+    replace an existing file. It never writes to the ALM (only GET requests). If ELM_DOWNLOAD_DIR is set,
+    `dest` must be inside that directory (symlinks and `..` resolved), otherwise the call is refused. The size
+    is capped by ELM_MAX_DOWNLOAD_MB (default 50) and the whole download by ELM_DOWNLOAD_TIMEOUT seconds
+    (default 300); a refused, failed or expired download leaves no file. The file mode is 0666 minus the umask.
+    Returns {"path", "size"}.
     """
     return await attachments.download_attachment(id, attachment, dest, overwrite)
 

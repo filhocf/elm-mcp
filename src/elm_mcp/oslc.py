@@ -12,7 +12,7 @@ from xml.sax.saxutils import escape as _xml_escape
 import httpx
 
 from . import cache, profile
-from .auth import _authenticate, get_client
+from .auth import _authenticate, get_client, session_state
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -156,6 +156,21 @@ def assert_same_origin(url: str) -> str:
     return url
 
 
+async def _reauthenticate(client: httpx.AsyncClient, seen_generation: int) -> None:
+    """Log in again after a 401, ONCE per expiry however many requests took it at the same time.
+
+    ``seen_generation`` is the session generation read BEFORE the request was sent. Under the lock, a
+    changed generation means another request already logged in after this one went out, so the new session
+    is used as is; otherwise this call logs in and starts the next generation.
+    """
+    state = session_state(client)
+    async with state.lock:
+        if state.generation != seen_generation:
+            return
+        await _authenticate(client)
+        state.generation += 1
+
+
 async def _request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:
     """Send a request, re-authenticating ONCE when the session looks expired (see _needs_reauth).
 
@@ -163,13 +178,14 @@ async def _request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -
     """
     assert_same_origin(url)
     send = getattr(client, method.lower())
+    generation = session_state(client).generation
     resp = await send(url, **kwargs)
     if _needs_reauth(resp):
         # A 403 without oslc:message is treated as an expired session/CSRF and the request is resent
         # once, writes included (decision: 403 refuses the write, covered by the F1 tests). Residual risk:
         # if that 403 was a real refusal the write is sent twice; it is bounded to one resend and the
         # second answer is the one reported.
-        await _authenticate(client)
+        await _reauthenticate(client, generation)
         resp = await send(url, **kwargs)
     return resp
 
