@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape as _xml_escape
 
 import httpx
 
-from . import cache
+from . import cache, profile
 from .auth import _authenticate, get_client
 from .config import settings
 
@@ -266,7 +266,6 @@ async def _find_query_base(domain: str, project_url: str) -> str:
         raise ValueError(
             "QM query capabilities are chosen by resource type, not by this generic lookup: use qm.query_members."
         )
-    client = await get_client()
     resource_type = QUERY_RESOURCE_TYPE[domain]
 
     # RM (DOORS Next): uses /views endpoint with projectURL parameter
@@ -281,19 +280,22 @@ async def _find_query_base(domain: str, project_url: str) -> str:
                 f"{settings.elm_url}/rm/views?oslc.query=true&projectURL={settings.elm_url}/rm/rm-projects/{project_id}"
             )
 
-    # CCM/QM: derive services endpoint from catalog URL
-    urls_to_try = []
+    # CCM/QM: the service provider document. A project URL that is not a services.xml shares the discovery cache
+    # (one fetch per project area); a services.xml URL keeps its own order of candidates.
     if project_url and not project_url.endswith("services.xml"):
-        urls_to_try = [project_url.rstrip("/") + "/services", project_url]
+        urls_to_try = [None]
     else:
         urls_to_try = [project_url.replace("/services.xml", "/services"), project_url]
 
     last_http_error: ValueError | None = None
     for url in urls_to_try:
         try:
-            sp = await _get_xml(client, url)
+            if url is None:
+                sp = ET.fromstring(await _fetch_service_xml(project_url))
+            else:
+                sp = await _get_xml(await get_client(), url)
         except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
-            logger.debug("OSLC discovery: skipping %s (%s)", url, exc)
+            logger.debug("OSLC discovery: skipping %s (%s)", url or project_url, exc)
             if isinstance(exc, ValueError) and not isinstance(exc, ET.ParseError):
                 last_http_error = exc
             continue
@@ -1030,6 +1032,7 @@ async def transition_workitem(item_uri: str, action: str) -> dict:
     actions_resp = await fetch(
         client, "GET", f"{workflows}/actions/{workflow}", "transition_workitem", headers=json_headers
     )
+    action = profile.action_aliases(profile.load(area)).get(action.strip(), action)
     action_id = _resolve_workflow_action(action, _action_ids(actions_resp.json()))
 
     resp = await _request(
@@ -1188,8 +1191,113 @@ def _extract_identifier(xml_text: str) -> str | None:
     return m.group(1) if m else None
 
 
+IF_EXISTS_MODES = ("error", "return", "create")
+
+# Failures after which the server may already have processed a POST: never resent, the duplicate is queried again.
+_AMBIGUOUS_FAILURES = (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.RemoteProtocolError)
+
+
+def check_if_exists(if_exists: str) -> str:
+    """The ``if_exists`` mode, or ValueError (raised before any request is made)."""
+    if if_exists not in IF_EXISTS_MODES:
+        raise ValueError(f"Invalid if_exists '{if_exists}'. Must be one of: {', '.join(IF_EXISTS_MODES)}.")
+    return if_exists
+
+
+def normalize_title(title: str | None) -> str:
+    """Title as compared by the duplicate check: edge and repeated whitespace removed, case-folded."""
+    return " ".join((title or "").split()).casefold()
+
+
+def _where_literal(value: str) -> str:
+    """A string literal for oslc.where (backslash and double quote escaped)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _entry_uri(entry: dict) -> str:
+    return entry.get("uri") or entry.get("rdf:about") or ""
+
+
+def _entry_identifier(entry: dict) -> str:
+    return str(entry.get("identifier") or entry.get("dcterms:identifier") or "?")
+
+
+def _describe(entries: list[dict]) -> str:
+    return "; ".join(f"{_entry_uri(e)} (identifier {_entry_identifier(e)})" for e in entries)
+
+
+async def create_idempotent(if_exists: str, find, create, kind: str) -> dict:
+    """Create unless ``find()`` already lists an equivalent artifact (SPEC-idempotencia).
+
+    ``find`` returns the existing equivalents ([{uri | rdf:about, identifier | dcterms:identifier, ...}]);
+    ``create`` performs the POST and returns the created resource. ``if_exists``: ``error`` refuses naming the
+    existing one, ``return`` hands it back with ``created: false``, ``create`` skips the check. A failed check
+    refuses the creation (except ``create``). After an ambiguous failure (timeout once the request was sent) the
+    POST is NOT resent: ``find`` runs again and only an artifact that was not there before counts as created.
+    """
+    check_if_exists(if_exists)
+    before: list[dict] = []
+    if if_exists != "create":
+        try:
+            before = await find()
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            raise ValueError(
+                f"The duplicate check failed ({exc}); nothing was created. Fix the cause, or pass "
+                "if_exists='create' to create without the check."
+            ) from exc
+        if before and if_exists == "return":
+            return {**before[0], "created": False}
+        if before:
+            raise ValueError(
+                f"A {kind} with the same title already exists: {_describe(before)}. "
+                "Use if_exists='return' to get it, or if_exists='create' to create another one."
+            )
+    try:
+        return {**await create(), "created": True}
+    except _AMBIGUOUS_FAILURES as exc:
+        known = {_entry_uri(e) for e in before}
+        try:
+            found = await find()
+        except (ValueError, RuntimeError, httpx.HTTPError) as requery_exc:
+            raise ValueError(
+                f"The creation request failed without an answer ({exc}) and the {kind} could not be queried again "
+                f"({requery_exc}). It may or may not exist; the request was NOT resent. Check before retrying."
+            ) from exc
+        new = [e for e in found if _entry_uri(e) not in known]
+        if if_exists != "create" and new:
+            return {
+                **new[0],
+                "created": True,
+                "warning": f"The server did not answer the creation request ({exc}); the {kind} was found "
+                "afterwards, so it was created. The request was NOT resent.",
+            }
+        detail = f" Possible matches: {_describe(found)}." if found else ""
+        raise ValueError(
+            f"The creation request failed without an answer ({exc}) and no new {kind} was found afterwards."
+            f"{detail} The request was NOT resent; check before retrying."
+        ) from exc
+
+
+async def _find_rm_duplicates(project: str, title: str, shape: str, folder: str | None) -> list[dict]:
+    """Requirements of the project with the same normalized title, type and (when given) folder."""
+    results = await query_resources("rm", project, f"dcterms:title={_where_literal(title.strip())}")
+    wanted = normalize_title(title)
+    return [
+        {"uri": item["uri"], "identifier": item.get("identifier")}
+        for item in results
+        if normalize_title(item.get("title")) == wanted
+        and item.get("type") == shape
+        and (folder is None or item.get("folder") == folder)
+    ]
+
+
 async def create_requirement(
-    project: str, title: str, xhtml: str, folder: str | None = None, shape: str | None = None
+    project: str,
+    title: str,
+    xhtml: str,
+    folder: str | None = None,
+    shape: str | None = None,
+    if_exists: str = "error",
 ) -> dict:
     """Create an RM requirement via OSLC POST to the requirementFactory.
 
@@ -1197,16 +1305,30 @@ async def create_requirement(
     discovers the factory, sanitizes nothing here (the caller passes already-sanitized
     XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
     Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
-    Returns {"uri": ..., "identifier": ...}, the identifier re-read from the server (D8). If the re-read
-    fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier (or
-    None) and a short ``warning`` key, and logs a warning.
+    Before the POST, a requirement with the same normalized title, type and folder is looked up (see
+    create_idempotent, ``if_exists``); the result carries ``created``.
+    Returns {"uri": ..., "identifier": ..., "created": ...}, the identifier re-read from the server (D8). If the
+    re-read fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier
+    (or None) and a short ``warning`` key, and logs a warning.
     Raises ValueError if the project does not exist or the type is missing/unknown.
     """
+    check_if_exists(if_exists)
     project_url = await _resolve_project_url("rm", project)
     shape = await _resolve_requirement_shape(project, shape)
     factory_url = await _find_requirement_factory(project_url)
     _assert_xhtml_wellformed(xhtml)
     rdf_body = _requirement_to_rdfxml(title, xhtml, shape=shape, folder=folder)
+
+    async def find() -> list[dict]:
+        return await _find_rm_duplicates(project, title, shape, folder)
+
+    async def create() -> dict:
+        return await _post_requirement(factory_url, rdf_body)
+
+    return await create_idempotent(if_exists, find, create, "requirement")
+
+
+async def _post_requirement(factory_url: str, rdf_body: str) -> dict:
     client = await get_client()
     post_headers = {
         "Content-Type": "application/rdf+xml",
@@ -2455,3 +2577,101 @@ async def workitem_filters(
     if planned_for is not None:
         clauses.append(f"rtc_cm:plannedFor=<{planned_for}>")
     return clauses
+
+
+# ---------------------------------------------------------------------------------------------
+# Work item creation: duplicate check, required fields (SPEC-idempotencia, SPEC-perfil-template)
+# ---------------------------------------------------------------------------------------------
+_PARENT_LINK = "rtc_cm:com.ibm.team.workitem.linktype.parentworkitem.parent"
+_WORKITEM_QUERY_SELECT = f"dcterms:title,dcterms:identifier,dcterms:type,rtc_cm:type,{_PARENT_LINK}"
+_CCM_PREFIXES = {
+    **{name: NS[name] for name in ("dcterms", "rdf", "oslc", "oslc_cm")},
+    "rtc_cm": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/",
+    "rtc_ext": "http://jazz.net/xmlns/prod/jazz/rtc/ext/1.0/",
+}
+# Properties create_workitem always sends itself: never asked from the caller or the profile.
+_SELF_FILLED = frozenset({"dcterms:title", "dcterms:type", "rtc_cm:type"})
+
+
+async def find_workitem_duplicates(project: str, title: str, type_id: str, parent_id: str | None) -> list[dict]:
+    """Work items of the project with the same normalized title, type and parent (none when no parent is given)."""
+    results = await query_resources(
+        "ccm", project, f"dcterms:title={_where_literal(title.strip())}", select=_WORKITEM_QUERY_SELECT
+    )
+    wanted = normalize_title(title)
+    found = []
+    for item in results:
+        if normalize_title(item.get("dcterms:title")) != wanted:
+            continue
+        type_uri = _resource_uri(item.get("rtc_cm:type"))
+        item_type = _last_segment(type_uri) if type_uri else item.get("dcterms:type")
+        if item_type != type_id:
+            continue
+        parents = {_workitem_key(u) for u in map(_resource_uri, _as_list(item.get(_PARENT_LINK))) if u}
+        if str(parent_id).strip() not in parents if parent_id else parents:
+            continue
+        found.append(
+            {
+                "rdf:about": item.get("rdf:about", ""),
+                "dcterms:identifier": item.get("dcterms:identifier"),
+                "dcterms:title": item.get("dcterms:title"),
+            }
+        )
+    return found
+
+
+def _required_shape_fields(props: list[dict]) -> list[dict]:
+    """Required, writable properties of a shape, each with the prefixed ``key`` used in payloads."""
+    fields = []
+    for p in props:
+        if not p["required"] or p["read_only"] or not p["property_uri"]:
+            continue
+        key = _compact(p["property_uri"], _CCM_PREFIXES)
+        if key is None or key in _SELF_FILLED:
+            continue
+        fields.append({**p, "key": key})
+    return fields
+
+
+async def missing_required_fields(factory: dict, payload: dict) -> list[str] | None:
+    """Required shape properties without default value that ``payload`` does not carry.
+
+    Returned as "key (title)" strings; None when the shape cannot be read (the server then validates).
+    """
+    if not factory.get("shape_uri"):
+        return None
+    try:
+        props = await list_shape_properties(factory["shape_uri"])
+    except (ValueError, httpx.HTTPError) as exc:
+        logger.warning(
+            "create_workitem: shape of %s unreadable (%s); required fields not pre-checked", factory["id"], exc
+        )
+        return None
+    return [
+        f"{f['key']} ({f['title'] or f['name']})"
+        for f in _required_shape_fields(props)
+        if not f["default_value"] and f["key"] not in payload
+    ]
+
+
+async def build_profile_draft(project: str) -> dict:
+    """A profile draft from the discovery: per type, its required fields (value null) and the allowed values.
+
+    Read-only. ``defaults`` is the part a person fills in; ``_review`` lists the allowed values to choose from
+    and is ignored when the profile is loaded.
+    """
+    defaults: dict = {}
+    review: dict = {}
+    for factory in await list_resource_shapes("ccm", project):
+        if not factory["shape_uri"]:
+            continue
+        values: dict = {}
+        notes: dict = {}
+        for field in _required_shape_fields(await list_shape_properties(factory["shape_uri"])):
+            default = field["default_value"]
+            values[field["key"]] = {"rdf:resource": default} if default else None
+            allowed = await list_allowed_values(field["allowed_values_uri"]) if field["allowed_values_uri"] else []
+            notes[field["key"]] = {"title": field["title"], "allowed_values": allowed}
+        defaults[factory["id"]] = values
+        review[factory["id"]] = notes
+    return {"defaults": defaults, "action_aliases": {}, "hidden_states": [], "_review": review}

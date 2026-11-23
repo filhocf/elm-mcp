@@ -96,7 +96,7 @@ async def test_list_workitems_gains_the_optional_filters_and_limit():
     schema = tool.input_schema or {}
     names = list(schema["properties"])
     assert names[:2] == ["project", "query"]
-    assert set(names[2:]) == {"type", "state", "owner", "planned_for", "limit"}
+    assert set(names[2:]) == {"type", "state", "owner", "planned_for", "limit", "include_hidden"}
     assert set(schema.get("required", [])) == {"project"}
     assert tool.annotations.read_only_hint is True
 

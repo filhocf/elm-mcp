@@ -36,6 +36,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -85,6 +91,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -137,6 +149,12 @@
           "type": "null|object",
           "required": false,
           "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
         }
       ]
     },
@@ -475,6 +493,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "include_hidden",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },

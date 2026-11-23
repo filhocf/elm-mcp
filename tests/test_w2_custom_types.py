@@ -67,7 +67,7 @@ async def test_create_workitem_accepts_any_type_the_project_exposes(w2_router, t
     """By id, by title (any case) or by a title that does not follow the factory naming pattern."""
     mock_ccm(w2_router)
     posts = mock_creation(w2_router)
-    result = await server.create_workitem(project=PROJECT, title="T", type=type_arg)
+    result = await server.create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
     assert result["dcterms:identifier"] == "42"
     _only_post_to(posts, type_id)
     assert f"/types/{PA}/{type_id}" in _posted_body(posts, type_id)
@@ -80,7 +80,7 @@ async def test_every_type_id_listed_by_list_types_is_accepted_by_create_workitem
     posts = mock_creation(w2_router)
     listed = {t["id"] for t in await server.list_types("ccm", PROJECT)}
     assert type_id in listed
-    await server.create_workitem(project=PROJECT, title="T", type=type_id)
+    await server.create_workitem(project=PROJECT, title="T", type=type_id, if_exists="create")
     _only_post_to(posts, type_id)
 
 
@@ -93,7 +93,7 @@ async def test_story_alias_follows_the_project_not_a_hardcoded_id(w2_router):
     ]
     mock_ccm(w2_router, factories)
     posts = mock_creation(w2_router, factories)
-    await server.create_workitem(project=PROJECT, title="T", type="story")
+    await server.create_workitem(project=PROJECT, title="T", type="story", if_exists="create")
     _only_post_to(posts, custom_story)
     assert f"/types/{PA}/{custom_story}" in _posted_body(posts, custom_story)
 
@@ -104,9 +104,9 @@ async def test_a_type_missing_from_a_small_project_is_refused_and_a_custom_one_i
     mock_ccm(w2_router, factories)
     posts = mock_creation(w2_router, factories)
     with pytest.raises(ToolError, match="Change Request"):
-        await server.create_workitem(project=PROJECT, title="T", type="task")
+        await server.create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     assert sum(r.call_count for r in posts.values()) == 0
-    await server.create_workitem(project=PROJECT, title="T", type="Change Request")
+    await server.create_workitem(project=PROJECT, title="T", type="Change Request", if_exists="create")
     _only_post_to(posts, "com.example.workitem.change")
 
 
@@ -117,7 +117,7 @@ async def test_unknown_type_is_refused_listing_the_types_of_the_project(w2_route
     mock_ccm(w2_router)
     posts = mock_creation(w2_router)
     with pytest.raises(ToolError) as exc:
-        await server.create_workitem(project=PROJECT, title="T", type="epic")
+        await server.create_workitem(project=PROJECT, title="T", type="epic", if_exists="create")
     message = str(exc.value)
     assert "epic" in message
     for type_id, _ in f.TYPED_FACTORIES:
@@ -135,7 +135,7 @@ async def test_type_discovery_failure_names_the_gate_and_creates_nothing(w2_rout
     w2_router.get(f"{BASE}/ccm/oslc/contexts/{PA}/services").mock(return_value=httpx.Response(404))
     w2_router.get(f"{BASE}/ccm/oslc/contexts/{PA}").mock(return_value=httpx.Response(404))
     with pytest.raises(ToolError, match=r"\[recurso-inexistente-ou-invisivel\]"):
-        await server.create_workitem(project=PROJECT, title="T", type="defect")
+        await server.create_workitem(project=PROJECT, title="T", type="defect", if_exists="create")
     assert sum(r.call_count for r in posts.values()) == 0
 
 

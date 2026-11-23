@@ -141,6 +141,7 @@ async def test_create_requirement_posts_xhtml_primarytext_and_returns_uri():
         title="Novo Requisito",
         content="<p>Conteúdo <b>rico</b></p>",
         type=RM_SHAPE_URI,
+        if_exists="create",
     )
     assert post_route.called
     assert reread_route.called
@@ -170,6 +171,7 @@ async def test_create_requirement_accepts_200():
         title="Req 200",
         content="<p>ok</p>",
         type=RM_SHAPE_URI,
+        if_exists="create",
     )
     assert isinstance(result, dict)
     returned = str(result.get("uri") or result.get("url") or "")
@@ -194,6 +196,7 @@ async def test_create_requirement_folder_emits_nav_parent():
         content="<p>x</p>",
         folder=folder_uri,
         type=RM_SHAPE_URI,
+        if_exists="create",
     )
     body = post_route.calls[0].request.content.decode()
     assert "nav:parent" in body
@@ -286,6 +289,7 @@ async def test_create_requirement_unknown_project_raises_tool_error():
             project="PROJETO INEXISTENTE",
             title="X",
             content="<p>x</p>",
+            if_exists="create",
         )
 
 
@@ -347,6 +351,7 @@ async def test_create_requirement_rejects_malformed_content():
             project="MY RM PROJECT",
             title="Injection",
             content="ok</div></jazz_rm:primaryText><evil/>",
+            if_exists="create",
         )
     assert not posted.called  # nothing was POSTed with a malformed body
 

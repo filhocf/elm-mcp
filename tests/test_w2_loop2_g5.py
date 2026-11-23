@@ -363,7 +363,7 @@ async def test_set_field_refuses_a_value_that_does_not_fit_the_range(w2_router, 
 async def test_create_workitem_discovers_the_project_and_factories_once(w2_router):
     mock_ccm(w2_router)
     mock_creation(w2_router)
-    await server.create_workitem(project=PROJECT, title="T", type="task")
+    await server.create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
     urls = [str(request.url) for request, _ in w2_router.calls]
     assert sum(u.endswith("/services") for u in urls) == 1, urls
     assert sum(u.endswith("/workitems/catalog") for u in urls) == 1, urls

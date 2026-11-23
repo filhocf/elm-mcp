@@ -269,7 +269,9 @@ async def test_write_create_requirement_403_with_message_passes_message_intact()
     respx.post(FACTORY_URL).mock(return_value=_json_message(SERVER_MESSAGE))
 
     with pytest.raises(ToolError) as exc_info:
-        await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>", type=SHAPE_REQ)
+        await server.create_requirement(
+            project=PROJECT, title="Req", content="<p>x</p>", type=SHAPE_REQ, if_exists="create"
+        )
 
     message = str(exc_info.value)
     assert "regra-de-processo" in message
@@ -283,7 +285,9 @@ async def test_write_create_requirement_403_without_message_reports_permissao_af
     post_route = respx.post(FACTORY_URL).mock(return_value=httpx.Response(403, text="Forbidden"))
 
     with pytest.raises(ToolError) as exc_info:
-        await server.create_requirement(project=PROJECT, title="Req", content="<p>x</p>", type=SHAPE_REQ)
+        await server.create_requirement(
+            project=PROJECT, title="Req", content="<p>x</p>", type=SHAPE_REQ, if_exists="create"
+        )
 
     _assert_gate(str(exc_info.value), "permissao")
     assert post_route.call_count == 2, "one write, one re-authenticated retry, then report"
