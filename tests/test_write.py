@@ -89,6 +89,12 @@ def _mock_ccm_discovery():
     respx.get(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
         return_value=httpx.Response(200, json={})
     )
+    # create_workitem reads the shape of the type to list missing required fields (none here)
+    respx.get(url__regex=r".*/shapes/workitems/.*").mock(
+        return_value=httpx.Response(
+            200, text='<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"></rdf:RDF>'
+        )
+    )
 
 
 @respx.mock
@@ -124,7 +130,7 @@ async def test_create_workitem_tool():
     respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    result = await create_workitem(project="MY PROJECT (KEY)", title="New Task", type="task")
+    result = await create_workitem(project="MY PROJECT (KEY)", title="New Task", type="task", if_exists="create")
     assert result["dcterms:identifier"] == "42"
 
 
@@ -134,7 +140,9 @@ async def test_create_workitem_with_parent():
     respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    result = await create_workitem(project="MY PROJECT (KEY)", title="Child Task", type="task", parent_id="10")
+    result = await create_workitem(
+        project="MY PROJECT (KEY)", title="Child Task", type="task", parent_id="10", if_exists="create"
+    )
     assert result["dcterms:identifier"] == "42"
 
 
@@ -160,14 +168,14 @@ async def test_add_child_workitem_tool():
     respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    result = await add_child_workitem(parent_id="10", title="Sub-task", project="MY PROJECT (KEY)")
+    result = await add_child_workitem(parent_id="10", title="Sub-task", project="MY PROJECT (KEY)", if_exists="create")
     assert result["dcterms:identifier"] == "42"
 
 
 async def test_add_child_workitem_requires_project():
     """project é obrigatório (sem default de tenant): chamar sem ele é TypeError."""
     with pytest.raises(TypeError):
-        await add_child_workitem(parent_id="10", title="Sub-task")
+        await add_child_workitem(parent_id="10", title="Sub-task", if_exists="create")
 
 
 async def test_create_workitem_invalid_type(w2_router, monkeypatch):
@@ -177,7 +185,7 @@ async def test_create_workitem_invalid_type(w2_router, monkeypatch):
     monkeypatch.setattr("elm_mcp.config.settings.elm_url", BASE)
     mock_ccm(w2_router)
     with pytest.raises(ToolError, match="Available types: .*task") as exc:
-        await create_workitem(project=PROJECT, title="X", type="epic")
+        await create_workitem(project=PROJECT, title="X", type="epic", if_exists="create")
     assert "epic" in str(exc.value)
 
 
@@ -367,6 +375,7 @@ async def test_create_workitem_with_custom_fields():
         title="Test Task",
         type="task",
         custom_fields={"rtc_ext:com.company.team.workitem.attribute.categoriatarefa": "literal.l10"},
+        if_exists="create",
     )
     assert result["dcterms:identifier"] == "42"
     # Verify custom field is in the posted body
@@ -387,6 +396,7 @@ async def test_create_workitem_without_custom_fields():
         project="MY PROJECT (KEY)",
         title="Test Task",
         type="task",
+        if_exists="create",
     )
     assert result["dcterms:identifier"] == "42"
     # No iterations available → no plannedFor in payload
@@ -414,7 +424,7 @@ async def test_golden_creation_url_is_the_type_factory_not_the_generic_one():
     generic_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    result = await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
+    result = await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
     assert result["dcterms:identifier"] == "42"
     assert post_route.call_count == 1
     assert generic_route.call_count == 0
@@ -428,7 +438,7 @@ async def test_golden_content_type_is_rdf_xml():
     post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
     assert post_route.calls[0].request.headers["content-type"] == "application/rdf+xml"
 
 
@@ -441,7 +451,9 @@ async def test_golden_category_uses_itemoid_format():
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     category = f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}"
-    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", filed_against=category)
+    await create_workitem(
+        project="MY PROJECT (KEY)", title="Test", type="task", filed_against=category, if_exists="create"
+    )
     body = post_route.calls[0].request.content.decode()
     assert f"resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}" in body
     assert "/categories/_MWxBEJB7Ee-fe_bes9r78g/default" not in body
@@ -454,7 +466,7 @@ async def test_create_workitem_without_filed_against_omits_it_and_ignores_shape_
     post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
     assert "filedAgainst" not in post_route.calls[0].request.content.decode()
 
 
@@ -475,6 +487,7 @@ async def test_golden_custom_fields_as_rdf_resource():
                 "rdf:resource": f"{BASE}/ccm/oslc/enumerations/{PROJECT_AREA_ID}/com.company.team.workitem.enumeration.categoriatarefa/com.company.team.workitem.enumeration.categoriatarefa.literal.l10"
             }
         },
+        if_exists="create",
     )
     body = post_route.calls[0].request.content.decode()
     assert "categoriatarefa" in body
@@ -490,7 +503,7 @@ async def test_golden_type_id_is_task_not_requirementchangerequest():
     post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
     body = post_route.calls[0].request.content.decode()
     assert f"/types/{PROJECT_AREA_ID}/task" in body
 
@@ -518,7 +531,7 @@ async def test_golden_plannedfor_iteration_format():
     post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
-    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
     body = post_route.calls[0].request.content.decode()
     assert f"/oslc/iterations/{ITERATION_OID}" in body
 
