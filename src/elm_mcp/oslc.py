@@ -4,6 +4,7 @@ import html as _html
 import io
 import logging
 import re as _re
+from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -340,24 +341,64 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
     return data.get("oslc:results", data.get("rdfs:member", data.get("results", [data])))
 
 
+_XHTML_NS = "http://www.w3.org/1999/xhtml"
+
+
+def _qname(tag: str, prefixes: dict[str, str]) -> str:
+    """Prefixed name for an ElementTree ``{ns}local`` tag, using the prefixes seen in the document."""
+    ns_uri, _, local = tag[1:].partition("}") if tag.startswith("{") else ("", "", tag)
+    prefix = prefixes.get(ns_uri, "")
+    return f"{prefix}:{local}" if prefix else local
+
+
+def _serialize_literal(prop: ET.Element, prefixes: dict[str, str]) -> str:
+    """Serialize the content of a ``rdf:parseType="Literal"`` element from the already parsed tree.
+
+    Top-level XHTML elements get ``xmlns="http://www.w3.org/1999/xhtml"``; nested XHTML elements are
+    written without prefix. Other namespaces use the prefix declared in the document.
+    """
+
+    def render(el: ET.Element, parent_ns: str) -> str:
+        ns_uri = el.tag[1:].partition("}")[0] if el.tag.startswith("{") else ""
+        name = el.tag.partition("}")[2] if ns_uri == _XHTML_NS else _qname(el.tag, prefixes)
+        attrs = "".join(f' {_qname(k, prefixes)}="{_xml_escape(v, {chr(34): "&quot;"})}"' for k, v in el.attrib.items())
+        if ns_uri == _XHTML_NS and parent_ns != _XHTML_NS:
+            attrs = f' xmlns="{_XHTML_NS}"' + attrs
+        inner = _xml_escape(el.text or "") + "".join(
+            render(child, ns_uri) + _xml_escape(child.tail or "") for child in el
+        )
+        return f"<{name}{attrs}>{inner}</{name}>"
+
+    return (_xml_escape(prop.text or "") + "".join(render(c, "") + _xml_escape(c.tail or "") for c in prop)).strip()
+
+
 def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
     """Flatten the main rdf:Description of an RDF/XML document into a plain dict.
 
     Keys are ``rdf:about`` plus ``prefix:name`` for every property (prefixes as declared in the document).
     Values are text (literal), the inner XML as a string (``rdf:parseType="Literal"``) or a URI
     (``rdf:resource``); a repeated property becomes a list. The main Description is the one whose
-    ``rdf:about`` equals ``uri``, else the first one.
+    ``rdf:about`` equals ``uri``, else the first one. Malformed XML or a DTD/entity declaration raises
+    ``ValueError`` (legitimate OSLC responses carry no DTD).
     """
+    if "<!DOCTYPE" in xml_text or "<!ENTITY" in xml_text:
+        raise ValueError("invalid RDF/XML response: DTD/entity declarations are not accepted")
     prefixes: dict[str, str] = {}
     root = None
-    for event, item in ET.iterparse(io.StringIO(xml_text), events=("start-ns", "end")):
-        if event == "start-ns":
-            prefix, ns_uri = item
-            prefixes.setdefault(ns_uri, prefix)
-        else:
-            root = item
+    try:
+        for event, item in ET.iterparse(io.StringIO(xml_text), events=("start-ns", "end")):
+            if event == "start-ns":
+                prefix, ns_uri = item
+                prefixes.setdefault(ns_uri, prefix)
+            else:
+                root = item
+    except ET.ParseError as exc:
+        raise ValueError(f"invalid RDF/XML response: {exc}") from exc
     rdf_ns = NS["rdf"]
-    descriptions = list(root) if root is not None else []
+    if root is not None and root.tag == f"{{{rdf_ns}}}Description":
+        descriptions = [root]
+    else:
+        descriptions = list(root) if root is not None else []
     main = next((d for d in descriptions if d.get(f"{{{rdf_ns}}}about") == uri), None)
     if main is None and descriptions:
         main = descriptions[0]
@@ -366,20 +407,11 @@ def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
         return result
     result["rdf:about"] = main.get(f"{{{rdf_ns}}}about", uri)
     for prop in main:
-        key = _prop_qname(prop, prefixes)
+        key = _qname(prop.tag, prefixes)
         if prop.get(f"{{{rdf_ns}}}resource") is not None:
             value = prop.get(f"{{{rdf_ns}}}resource")
         elif prop.get(f"{{{rdf_ns}}}parseType") == "Literal":
-            raw = _re.search(
-                r"<"
-                + _re.escape(_prop_qname(prop, prefixes))
-                + r"\b[^>]*>(.*?)</"
-                + _re.escape(_prop_qname(prop, prefixes))
-                + ">",
-                xml_text,
-                _re.DOTALL,
-            )
-            value = raw.group(1).strip() if raw else ""
+            value = _serialize_literal(prop, prefixes)
         else:
             value = prop.text or ""
         if key in result:
@@ -391,22 +423,16 @@ def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
     return result
 
 
-def _prop_qname(prop: ET.Element, prefixes: dict[str, str]) -> str:
-    """Return the prefixed name (``prefix:local``) of an element as declared in the document."""
-    ns_uri, _, local = prop.tag[1:].partition("}") if prop.tag.startswith("{") else ("", "", prop.tag)
-    prefix = prefixes.get(ns_uri, "")
-    return f"{prefix}:{local}" if prefix else local
-
-
 async def get_resource(uri: str) -> dict:
     """Fetch a single OSLC resource by URI.
 
-    Asks for JSON. RM resources answer HTTP 415 to JSON: in that case the request is repeated with
-    ``application/rdf+xml`` and the RDF/XML is flattened to a dict (see _rdfxml_to_flat_dict).
+    Asks for JSON. RM resources (URI path starting with ``/rm/``) answer HTTP 415 to JSON: in that
+    case the request is repeated with ``application/rdf+xml`` and the RDF/XML is flattened to a dict
+    (see _rdfxml_to_flat_dict). Other resources (e.g. CCM) never get the fallback.
     """
     client = await get_client()
     resp = await _request(client, "GET", uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    if resp.status_code == 415:
+    if resp.status_code == 415 and urlparse(uri).path.startswith("/rm/"):
         resp = await fetch(
             client, "GET", uri, "read", headers={"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
         )

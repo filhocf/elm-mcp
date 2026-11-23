@@ -79,3 +79,13 @@ the `Authorization` header never appear in the message.
 - QM (ETM) is read-only through these tools; test-case write and cross-domain OSLC links
   (Implements Requirement / Tested By / Affects) are planned (`docs/specs/`, `docs/roadmap.md`).
 - State changes go through `transition_workitem` (workflow action), not `update_workitem`.
+
+## Flat dict from RDF/XML (`get_resource` on RM)
+
+`get_resource` asks for JSON first. The HTTP 415 fallback to `application/rdf+xml` applies **only to RM URIs** (path starting with `/rm/`); a 415 on any other URI (e.g. `/ccm/`) is reported as an error without a second call. The main `rdf:Description` is the one whose `rdf:about` equals the requested URI (else the first one). A malformed body, or one with a DTD/`<!ENTITY>`, raises `ValueError` (reported as a tool error).
+
+Limitations of the flat dict (lossy by design):
+
+- `rdf:nodeID` references and nested child nodes (a property whose value is an inline `rdf:Description`) are not preserved; such a property yields its text, usually empty.
+- `rdf:datatype` is dropped: typed literals come back as plain strings.
+- `rdf:parseType="Literal"` is returned as an XHTML string (`<div xmlns="http://www.w3.org/1999/xhtml">...</div>`) rebuilt from the parsed tree, not the original bytes (whitespace between attributes and namespace declarations may differ).
