@@ -170,6 +170,69 @@
       ]
     },
     {
+      "name": "download_attachment",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "attachment",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dest",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "overwrite",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ]
+    },
+    {
+      "name": "get_hours",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "item_ids",
+          "type": "array[string]|null",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "plan",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "project",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "group_by",
+          "type": "string",
+          "required": false,
+          "default": "person"
+        },
+        {
+          "name": "max_entries",
+          "type": "integer",
+          "required": false,
+          "default": 500
+        }
+      ]
+    },
+    {
       "name": "get_plan_items",
       "read_only": true,
       "parameters": [
@@ -307,6 +370,17 @@
       ]
     },
     {
+      "name": "list_attachments",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "list_comments",
       "read_only": true,
       "parameters": [
@@ -402,6 +476,17 @@
           "type": "integer|null",
           "required": false,
           "default": null
+        }
+      ]
+    },
+    {
+      "name": "list_time",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
         }
       ]
     },

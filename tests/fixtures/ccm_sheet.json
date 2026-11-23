@@ -1,0 +1,70 @@
+{
+ "rtc_cm:entry": [
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID001",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID002",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID003",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID004",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID005",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID006",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  },
+  {
+   "rdf:resource": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID007",
+   "rdf:type": [
+    {
+     "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+    }
+   ]
+  }
+ ],
+ "prefixes": {
+  "rtc_cm": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/",
+  "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ },
+ "rdf:type": [
+  {
+   "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheet"
+  }
+ ],
+ "rdf:about": "https://elm.example.com/ccm/oslc/workitems/559832/rtc_cm:timeSheet"
+}

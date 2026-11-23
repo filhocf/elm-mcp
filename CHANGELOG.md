@@ -7,6 +7,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+Hours and attachments, read only (SPEC-horas, SPEC-ccm-interno, wave W5):
+
+- `list_time(id)`: entries of a work item's time sheet (`entry_uri`, `person`, `date`, `hours`, `time_code`) and `total_hours`. Milliseconds become hours with 2 decimals; null time is 0.
+- `get_hours(item_ids=None, plan=None, project=None, group_by="person", max_entries=500)`: hours per person or per work item for the given items and their direct children (the `get_plan_items` selection). Entries are read with at most 8 requests at a time; above `max_entries` it returns a partial result (`partial`, `unread_entries`); an unreadable entry goes to `errors`; an item with `timeSpent` but no entries is marked `without_entries`.
+- `list_attachments(id)`: attachment metadata (`uri`, `name` without the identifier prefix, `identifier`, `format`, `creator`, `created`).
+- `download_attachment(id, attachment, dest, overwrite=False)`: saves an attachment to a local file (`Accept: */*`, base name of the server's `filename*` only, no overwrite without `overwrite=True`, size cap `ELM_MAX_DOWNLOAD_MB`, default 50, no partial file left). It only sends GET requests to the ALM.
+- G5 loop 2: `download_attachment` is no longer flagged read only (`readOnlyHint=false`, `destructiveHint=true`: it writes a local file); the tools are now 21 read-only and 14 write. New optional `ELM_DOWNLOAD_DIR` (destination confined to that root, symlinks and `..` resolved) and `ELM_DOWNLOAD_TIMEOUT` (default 300 s, temporary file removed). Local write errors become clear errors; filesystems without hardlinks are supported without overwriting; names are cut to 255 bytes and control characters dropped; the final file mode is 0666 minus the umask.
+- G5 loop 2: re-login after an expired session is serialized (one login per expiry, not one per request). `get_hours`: `max_entries` up to 5000, `partial` is also true when an entry failed, an entry listed by two items counts once.
+- Writing time entries and attachments through the internal API stays deferred (no `ELM_ENABLE_INTERNAL_API`).
+
 Discovery cache and RM query (SPEC-cache-shape, SPEC-rm-consulta, wave W4):
 
 - Discovery cache in memory (provider, factories, shapes, allowedValues, workflow, RM stream), per server and project area; TTL from `ELM_CACHE_TTL` (default 300 s, `0` turns it off).

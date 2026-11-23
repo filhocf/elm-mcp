@@ -1,0 +1,16 @@
+{
+ "dcterms:format": "image/png",
+ "dcterms:creator": {
+  "rdf:resource": "https://elm.example.com/jts/users/jdoe"
+ },
+ "dcterms:title": "diagram.png",
+ "dcterms:created": "2025-07-21T18:52:06.372Z",
+ "dcterms:modified": "2025-07-21T18:52:11.452Z",
+ "rdf:type": [
+  {
+   "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/Attachment"
+  }
+ ],
+ "rdf:about": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.Attachment/_ATT001",
+ "dcterms:identifier": 1001
+}
