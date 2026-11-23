@@ -24,7 +24,7 @@
     xmlns:rqm_qm="http://jazz.net/ns/qm/rqm#"
     xmlns:oslc_qm="http://open-services.net/ns/qm#"
     xmlns:oslc_rm="http://open-services.net/ns/rm#"
-    xmlns:foaf="http://xmlns.com/foaf/0.1/" > 
+    xmlns:foaf="http://xmlns.com/foaf/0.1/" >
  <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.TestcaseExecutionRecord">
   <oslc_qm:testExecutionRecord rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.TestcaseExecutionRecord/_ID001"/>
   <oslc_qm:testExecutionRecord rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.execution.TestcaseExecutionRecord/_ID002"/>
