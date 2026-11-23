@@ -158,7 +158,7 @@ async def test_state_filter_with_a_title_and_no_type_asks_for_the_state_id(w2_ro
     mock_ccm(w2_router)
     pages = FakePages(w2_router, [[wi(1)]])
     with pytest.raises(ToolError, match="list_workflow"):
-        await server.list_workitems(PROJECT, state="Cancelado")
+        await server.list_workitems(PROJECT, state="Closed")
     assert pages.requests == []
 
 
