@@ -1,0 +1,24 @@
+{
+ "dcterms:identifier": "559832",
+ "dcterms:title": "Task 1",
+ "rtc_cm:timeSpent": 129600000,
+ "rtc_cm:estimate": 144000000,
+ "rtc_cm:timeSheet": {
+  "rdf:resource": "https://elm.example.com/ccm/oslc/workitems/559832/rtc_cm:timeSheet",
+  "rdf:type": [
+   {
+    "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheet"
+   }
+  ]
+ },
+ "dcterms:type": "Task",
+ "dcterms:contributor": {
+  "rdf:resource": "https://elm.example.com/jts/users/jdoe",
+  "rdf:type": [
+   {
+    "rdf:resource": "http://xmlns.com/foaf/0.1/Person"
+   }
+  ]
+ },
+ "oslc_cm:status": "Done"
+}

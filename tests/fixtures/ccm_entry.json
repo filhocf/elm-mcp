@@ -1,0 +1,41 @@
+{
+ "prefixes": {
+  "acc": "http://open-services.net/ns/core/acc#",
+  "rtc_cm": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/",
+  "process": "http://jazz.net/ns/process#",
+  "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+  "dcterms": "http://purl.org/dc/terms/"
+ },
+ "rtc_cm:workItem": {
+  "rdf:resource": "https://elm.example.com/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/559832",
+  "rdf:type": [
+   {
+    "rdf:resource": "http://open-services.net/ns/cm#ChangeRequest"
+   }
+  ]
+ },
+ "rtc_cm:startDate": "2025-06-18T12:00:00.000Z",
+ "rtc_cm:timeCodeId": "timecode.literal.l1",
+ "acc:accessContext": {
+  "rdf:resource": "https://elm.example.com/ccm/acclist#_PA1"
+ },
+ "dcterms:creator": {
+  "rdf:resource": "https://elm.example.com/jts/users/jdoe",
+  "rdf:type": [
+   {
+    "rdf:resource": "http://xmlns.com/foaf/0.1/Person"
+   }
+  ]
+ },
+ "rtc_cm:timeCode": "Direct hours",
+ "process:projectArea": {
+  "rdf:resource": "https://elm.example.com/ccm/process/project-areas/_PA1"
+ },
+ "rdf:type": [
+  {
+   "rdf:resource": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/TimeSheetEntry"
+  }
+ ],
+ "rdf:about": "https://elm.example.com/ccm/resource/itemOid/com.ibm.team.workitem.TimeSheetEntry/_ID001",
+ "rtc_cm:timeSpent": 14400000
+}
