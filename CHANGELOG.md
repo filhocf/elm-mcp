@@ -5,18 +5,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
-### Fixed
-
-Live acceptance of W2 (read-only, ELM 7.0.1):
-
-- `list_workitems` filters now use what the server accepts in `oslc.where`: `type` is resolved (id, alias or
-  title) by the project's discovery and sent as `rtc_cm:type="<id>"` (`dcterms:type="<title>"` matched nothing);
-  `state` is sent as `rtc_cm:state="<state id>"` (a title is resolved by the workflow of the given `type`,
-  otherwise the call fails asking for the id; `oslc_cm:status` was an HTTP 400); `owner` is always a user URI.
-- `list_workflow` no longer fails with "does not expose its workflow": it reads the allowedValues document of the
-  shape's `state` property (`.../property/internalState/allowedValues`) and derives the workflow from the state
-  URIs; if the titles document cannot be read, it still returns the state ids.
-
 ### Added
 
 CCM collaboration (SPEC-ccm-colaboracao, wave W2):
@@ -35,13 +23,8 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
   attribute.
 - `list_workflow(project, type)`: states (`id`, `title`, `group`) and action ids of a type's workflow.
 
-### Security
-
-- URLs followed from server responses, and the URI given to `get_requirement`/`get_resource`, are accepted only
-  on the same origin as `ELM_URL` (scheme, host and port; default ports 80/443 are normalized), otherwise the call
-  fails before any request (`assert_same_origin`). Set `ELM_URL` to the exact public URL the server announces.
-- HTTP redirects are checked too: a 3xx whose `Location` leaves that origin is refused before it is followed
-  (response hook on the client). The login flow shares the rule, so an http->https or other-host redirect at login fails.
+- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
+- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
 
 ### Changed
 
@@ -58,7 +41,27 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 - `link_workitems` / `unlink_workitems` refuse a link of an item to itself; list_workitems filters also refuse non-printable characters.
 - `create_workitem` accepts any work item type the project exposes (id, title or short alias such as `task`/`story`); an unknown type is refused listing the available ones.
 
+- **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
+- Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
+- The main reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached. A login answering 403 or 5xx now fails (`[credencial]` / `[http-<status>]`) instead of being accepted; three direct reads still do not re-authenticate (see `docs/roadmap.md`, "Dívida conhecida").
+- `list_folders` now raises "project area not advertised by the service provider" instead of returning `[]` when `oslc:details` is missing.
+- `create_requirement`: if the re-read of D8 fails after the POST, it no longer raises (the requirement exists): it returns the URI, the POST-body identifier (or `null`) and a `warning`, and logs a warning.
+- `delete_requirement`: a denied (401/403) confirmation read reports "deletion not confirmed" (the DELETE was sent); the DELETE is unconditional (no `If-Match`).
+- The contract snapshot grew: each parameter now records its `default` when it declares one; `scripts/update_contract.py` accepts an output path.
+- `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
+  `reopen` work only where the workflow's action ids contain those words.
+
 ### Fixed
+
+Live acceptance of W2 (read-only, ELM 7.0.1):
+
+- `list_workitems` filters now use what the server accepts in `oslc.where`: `type` is resolved (id, alias or
+  title) by the project's discovery and sent as `rtc_cm:type="<id>"` (`dcterms:type="<title>"` matched nothing);
+  `state` is sent as `rtc_cm:state="<state id>"` (a title is resolved by the workflow of the given `type`,
+  otherwise the call fails asking for the id; `oslc_cm:status` was an HTTP 400); `owner` is always a user URI.
+- `list_workflow` no longer fails with "does not expose its workflow": it reads the allowedValues document of the
+  shape's `state` property (`.../property/internalState/allowedValues`) and derives the workflow from the state
+  URIs; if the titles document cannot be read, it still returns the state ids.
 
 W1 live-acceptance fixes (ELM 7.0.1):
 
@@ -96,22 +99,13 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
 - **D13** `create_workitem` without `filed_against` no longer sends a category (the server applies its own default) and
   no longer looks one up; a refusal about the category now adds a hint to use `list_fields` (property `filedAgainst`).
 
-### Added
+### Security
 
-- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
-- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
-
-### Changed
-
-- **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
-- Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
-- The main reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached. A login answering 403 or 5xx now fails (`[credencial]` / `[http-<status>]`) instead of being accepted; three direct reads still do not re-authenticate (see `docs/roadmap.md`, "Dívida conhecida").
-- `list_folders` now raises "project area not advertised by the service provider" instead of returning `[]` when `oslc:details` is missing.
-- `create_requirement`: if the re-read of D8 fails after the POST, it no longer raises (the requirement exists): it returns the URI, the POST-body identifier (or `null`) and a `warning`, and logs a warning.
-- `delete_requirement`: a denied (401/403) confirmation read reports "deletion not confirmed" (the DELETE was sent); the DELETE is unconditional (no `If-Match`).
-- The contract snapshot grew: each parameter now records its `default` when it declares one; `scripts/update_contract.py` accepts an output path.
-- `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
-  `reopen` work only where the workflow's action ids contain those words.
+- URLs followed from server responses, and the URI given to `get_requirement`/`get_resource`, are accepted only
+  on the same origin as `ELM_URL` (scheme, host and port; default ports 80/443 are normalized), otherwise the call
+  fails before any request (`assert_same_origin`). Set `ELM_URL` to the exact public URL the server announces.
+- HTTP redirects are checked too: a 3xx whose `Location` leaves that origin is refused before it is followed
+  (response hook on the client). The login flow shares the rule, so an http->https or other-host redirect at login fails.
 
 ## [0.5.0] - 2026-11-23
 
