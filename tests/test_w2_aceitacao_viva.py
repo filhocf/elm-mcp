@@ -190,6 +190,7 @@ async def test_owner_filter_is_always_the_user_uri_never_a_quoted_name(w2_router
 async def test_filters_are_combined_with_and_in_the_server_accepted_forms(w2_router):
     mock_ccm(w2_router)
     iteration = f"{BASE}/ccm/resource/itemOid/com.ibm.team.apt.Iteration/_ITER1"
+    _mock_workflow(w2_router, type_id=f.STORY_ID)
     where = await _where_of(
         w2_router, 'dcterms:title="Login"', type="story", state=STATE_IDS[0], owner="jdoe", planned_for=iteration
     )

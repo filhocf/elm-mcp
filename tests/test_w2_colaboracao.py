@@ -22,6 +22,7 @@ from elm_mcp.auth import close_client
 from elm_mcp.server import mcp
 
 from . import f1_fixtures as f
+from .test_w2_aceitacao_viva import _mock_workflow
 from .w2_fixtures import (
     BASE,
     POINTS_ENUM,
@@ -560,6 +561,7 @@ async def test_list_workitems_filter_is_sent_to_the_server_in_oslc_where(w2_rout
 
 async def test_list_workitems_combines_filters_and_the_raw_query_with_and(w2_router):
     pages = _query_setup(w2_router)
+    _mock_workflow(w2_router)  # com `type`, o id do estado tem de estar no workflow do tipo
     await server.list_workitems(PROJECT, 'dcterms:title="Login"', **FILTER_VALUES)
     where = pages.where_of_first_request()
     assert 'dcterms:title="Login"' in where

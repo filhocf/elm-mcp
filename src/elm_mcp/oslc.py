@@ -2017,13 +2017,25 @@ def _is_state_property(p: dict) -> bool:
     return p["property_uri"] == "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/state" or p["name"] == "state"
 
 
-async def _workflow_of(factory: dict) -> dict:
-    """Workflow of a type (resolved factory): states (id, title, group) and action ids.
+_ID_RE = _re.compile(r"[A-Za-z0-9._:-]+")
+_STATE_ID_RE = _re.compile(r"[A-Za-z0-9_:-]+(\.[A-Za-z0-9_:-]+)+")
+
+
+def _checked_id(name: str, value: str) -> str:
+    """Id used inside an oslc.where clause: ASCII letters, digits, '.', '_', ':' and '-' only (checked AFTER unquote)."""
+    if not _ID_RE.fullmatch(value):
+        raise ValueError(f"Filter '{name}' has an invalid id (only A-Z a-z 0-9 . _ : - are allowed): {value!r}")
+    return value
+
+
+async def _workflow_states(factory: dict) -> tuple[str, str, list[dict]]:
+    """(area, workflow, states) of a type; states carry id, title and group. Does not read the actions.
 
     Verified live: the shape's ``state`` property points at ``.../shapes/workitems/{type}/property/
     internalState/allowedValues``, whose values are the state URIs
     ``/oslc/workflows/{pa}/states/{wf}/{state}``. Area and workflow come from those URIs; titles and
     groups from ``.../states/{wf}`` (when that document cannot be read, the state ids are still returned).
+    Ids that are not a valid id after unquote are dropped (never reach an oslc.where).
     """
     if not factory["shape_uri"]:
         raise ValueError(f"Type '{factory['title']}' has no resource shape: its workflow cannot be resolved.")
@@ -2040,9 +2052,9 @@ async def _workflow_of(factory: dict) -> dict:
         )
     area, workflow = matches[0].group(1), matches[0].group(2)
     state_ids = [unquote(m.group(3)) for m in matches if (m.group(1), m.group(2)) == (area, workflow)]
+    state_ids = [sid for sid in state_ids if _ID_RE.fullmatch(sid)]
     client = await get_client()
     states_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/states/{workflow}"
-    actions_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/actions/{workflow}"
     states: list[dict] = []
     try:
         states_resp = await fetch(client, "GET", states_url, "list_workflow", headers=_JSON_HEADERS)
@@ -2050,9 +2062,10 @@ async def _workflow_of(factory: dict) -> dict:
             if not isinstance(s, dict):
                 continue
             about = s.get("rdf:about") or ""
+            sid = s.get("dcterms:identifier") or (_last_segment(about) if about else None)
             states.append(
                 {
-                    "id": s.get("dcterms:identifier") or (_last_segment(about) if about else None),
+                    "id": sid if isinstance(sid, str) and _ID_RE.fullmatch(sid) else None,
                     "title": s.get("dcterms:title"),
                     "group": s.get("rtc_cm:group"),
                 }
@@ -2061,6 +2074,14 @@ async def _workflow_of(factory: dict) -> dict:
         states = []
     if not states:
         states = [{"id": sid, "title": None, "group": None} for sid in state_ids]
+    return area, workflow, states
+
+
+async def _workflow_of(factory: dict) -> dict:
+    """Workflow of a type (resolved factory): states (id, title, group) and action ids."""
+    area, workflow, states = await _workflow_states(factory)
+    client = await get_client()
+    actions_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/actions/{workflow}"
     actions_resp = await fetch(client, "GET", actions_url, "list_workflow", headers=_JSON_HEADERS)
     return {
         "type": factory["title"],
@@ -2099,22 +2120,30 @@ def _is_uri(value: str) -> bool:
 
 
 async def _state_filter_id(state: str, factory: dict | None) -> str:
-    """State id for rtc_cm:state: an id (or state URI) passes through; a title needs the workflow of ``type``."""
+    """State id for rtc_cm:state, always validated as an id after unquote (never a free string).
+
+    A state URI gives its last segment. With ``type`` the value must be an id or a title of the type's
+    workflow (exact id > exact title; ambiguous = error). Without ``type`` only an id-shaped value
+    (dotted, no spaces) is accepted; anything else asks for the id (list_workflow).
+    """
     if _is_uri(state):
-        state = unquote(_last_segment(state))
-    if "." in state:
-        return state
+        return _checked_id("state", unquote(_last_segment(state)))
     hint = "Pass the state id instead (use list_workflow to see the ids of the type's states)."
     if factory is None:
+        if _STATE_ID_RE.fullmatch(state):
+            return state
         raise ValueError(
-            f"State '{state}' looks like a title, and a title can only be resolved together with `type`. {hint}"
+            f"State '{state}' is not a state id, and a title can only be resolved together with `type`. {hint}"
         )
-    states = (await _workflow_of(factory))["states"]
-    matches = [s["id"] for s in states if s["id"] and (s["title"] or "").strip().lower() == state.lower()]
-    if len(set(matches)) == 1:
-        return matches[0]
-    reason = "is ambiguous" if matches else "was not found"
-    raise ValueError(f"State '{state}' {reason} in the workflow of type '{factory['title']}'. {hint}")
+    states = (await _workflow_states(factory))[2]
+    by_id = {s["id"] for s in states if s["id"] == state}
+    by_title = {s["id"] for s in states if s["id"] and (s["title"] or "").strip().lower() == state.lower()}
+    for found in (by_id, by_title):
+        if len(found) == 1:
+            return _checked_id("state", next(iter(found)))
+        if len(found) > 1:
+            raise ValueError(f"State '{state}' is ambiguous in the workflow of type '{factory['title']}'. {hint}")
+    raise ValueError(f"State '{state}' was not found in the workflow of type '{factory['title']}'. {hint}")
 
 
 async def workitem_filters(
@@ -2140,7 +2169,7 @@ async def workitem_filters(
     if type is not None:
         project_url = await _resolve_project_url("ccm", project)
         factory = _resolve_ccm_type(await _list_ccm_creation_factories(project_url), type)
-        clauses.append(f'rtc_cm:type="{factory["id"]}"')
+        clauses.append(f'rtc_cm:type="{_checked_id("type", factory["id"])}"')
     if state is not None:
         clauses.append(f'rtc_cm:state="{await _state_filter_id(state, factory)}"')
     if owner is not None:
