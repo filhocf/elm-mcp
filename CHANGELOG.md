@@ -51,6 +51,7 @@ RM write and discovery: the agentic membrane for DOORS Next.
 ### Added
 
 - Discovery tools `list_types`, `list_fields`, `inspect_workitem` and `list_folders` — enumerate types, shape fields and folders per project area, so callers adapt to each project instead of hardcoding (#45).
+- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
 - `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
 - `create_requirement` tool — create a requirement in DOORS Next (RM) via OSLC; HTML content is
   sanitized to XHTML and stored in `jazz_rm:primaryText`; optional `folder` (nav:parent) and `type`

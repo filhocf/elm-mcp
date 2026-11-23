@@ -1,0 +1,378 @@
+{
+  "tools": [
+    {
+      "name": "add_child_workitem",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "parent_id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "description",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "create_requirement",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "content",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "type",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "create_workitem",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "description",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "parent_id",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "filed_against",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "custom_fields",
+          "type": "null|object",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "delete_requirement",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "get_plan_items",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "plan",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "item_ids",
+          "type": "array[string]|null",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "get_requirement",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "get_workitem",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "inspect_workitem",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_fields",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_folders",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_iterations",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_projects",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_types",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "domain",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_workitems",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "query",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "search_requirements",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "query",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "search_testcases",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "query",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "transition_workitem",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "action",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "update_requirement",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "content",
+          "type": "null|string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "update_workitem",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "description",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "estimate_hours",
+          "type": "null|number",
+          "required": false
+        },
+        {
+          "name": "planned_for",
+          "type": "null|string",
+          "required": false
+        },
+        {
+          "name": "custom_fields",
+          "type": "null|object",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

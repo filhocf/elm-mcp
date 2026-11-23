@@ -33,7 +33,7 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
-| `create_requirement` | `(project, title, content, folder=None, type)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is **required**: a shape URI or a type title, both from `list_types("rm", project)`; without it (or with an unknown title) the call is refused listing the valid types. Returns `{"uri", "identifier"}` read back from the server. |
+| `create_requirement` | `(project, title, content, folder=None, type=None)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is **required at runtime** (the schema keeps it optional so the refusal can list the valid types): a shape URI or a type title, both from `list_types("rm", project)`; without it (or with an unknown title) the call is refused listing the valid types. Returns `{"uri", "identifier"}` read back from the server. |
 | `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. |
 | `delete_requirement` | `(uri)` | Delete a requirement via OSLC DELETE (direct mode, irreversible) and confirm by re-reading it (404 or 410). Fails if it is still readable. Returns `{"uri", "deleted": true}`. |
 

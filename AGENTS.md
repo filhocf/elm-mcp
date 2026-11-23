@@ -83,5 +83,9 @@ uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
 ```
 
+Tool contract: `tests/contract/tools.snapshot.json` freezes tool names, parameters and the read-only flag.
+After an intentional change to a tool, regenerate it with `uv run python scripts/update_contract.py` and note
+it in `CHANGELOG.md`.
+
 Mock HTTP with `respx`. All tests are async (`asyncio_mode = "auto"`).
 Coverage excludes `cli.py` (interactive terminal code).

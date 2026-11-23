@@ -61,3 +61,8 @@ keywords into PT-BR prose.
   with `uvx ruff@latest`, not the venv's ruff (the CI uses latest and may flag newer rules).
 - **practice** — moving toward the repo-gold checklist (versioned `.codebase-memory/`,
   `tests-prove-fix`, SHA-pinned actions, in-repo review skill). See `docs/specs/SPEC-repo-gold-ci.md`.
+- **rule** — the tool contract (names, parameters with type and required flag, read-only flag) is frozen in
+  `tests/contract/tools.snapshot.json` and checked by `tests/test_w1_contract.py` (no network, no credentials).
+  After an INTENTIONAL change to a tool, regenerate it with `uv run python scripts/update_contract.py` and record
+  the change in `CHANGELOG.md`. Removing/renaming a tool or parameter, or a new required parameter, is a breaking
+  change: minor version bump (0.x) and a line under `### Changed`/`### Removed`.

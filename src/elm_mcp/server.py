@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from . import oslc
 from .config import settings
@@ -21,8 +22,11 @@ VALID_DOMAINS = ("rm", "ccm", "qm")
 _T = TypeVar("_T")
 
 
-def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+def _register(func: Callable[..., Awaitable[_T]], read_only: bool) -> Callable[..., Awaitable[_T]]:
     """Register an async MCP tool, translating domain errors into ToolError.
+
+    ``read_only`` is published as the MCP ``readOnlyHint`` annotation (part of the versioned
+    contract in tests/contract/tools.snapshot.json).
 
     OSLC/discovery failures surface from oslc.py as ValueError/RuntimeError
     (e.g. "Project not found", "No query capability found"). Without this wrap
@@ -41,10 +45,20 @@ def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
         except (ValueError, RuntimeError) as exc:
             raise ToolError(str(exc)) from exc
 
-    return mcp.tool()(wrapper)
+    return mcp.tool(annotations=ToolAnnotations(readOnlyHint=read_only))(wrapper)
 
 
-@tool
+def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+    """Register a WRITE tool (readOnlyHint=False)."""
+    return _register(func, read_only=False)
+
+
+def read_tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+    """Register a READ-ONLY tool (readOnlyHint=True)."""
+    return _register(func, read_only=True)
+
+
+@read_tool
 async def list_projects(domain: str) -> list[dict]:
     """List projects for a domain (rm=DOORS Next, ccm=RTC, qm=ETM)."""
     domain = domain.lower()
@@ -53,19 +67,19 @@ async def list_projects(domain: str) -> list[dict]:
     return await oslc.list_service_providers(domain)
 
 
-@tool
+@read_tool
 async def search_requirements(project: str, query: str | None = None) -> list[dict]:
     """Search requirements in a DOORS Next project. Query uses oslc.where syntax."""
     return await oslc.query_resources("rm", project, query)
 
 
-@tool
+@read_tool
 async def get_requirement(uri: str) -> dict:
     """Get a single requirement by its OSLC URI."""
     return await oslc.get_resource(uri)
 
 
-@tool
+@read_tool
 async def list_workitems(project: str, query: str | None = None) -> list[dict]:
     """Search work items in an RTC project. Query uses oslc.where syntax."""
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
@@ -89,14 +103,14 @@ async def list_workitems(project: str, query: str | None = None) -> list[dict]:
     return parsed
 
 
-@tool
+@read_tool
 async def get_workitem(id: str) -> dict:
     """Get a single work item by ID (constructs URI from CCM base)."""
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
     return await oslc.get_resource(uri)
 
 
-@tool
+@read_tool
 async def search_testcases(project: str, query: str | None = None) -> list[dict]:
     """Search test cases in an ETM project. Query uses oslc.where syntax."""
     return await oslc.query_resources("qm", project, query)
@@ -105,7 +119,7 @@ async def search_testcases(project: str, query: str | None = None) -> list[dict]
 TYPE_IDS = oslc.CCM_TYPE_IDS
 
 
-@tool
+@read_tool
 async def list_iterations(project: str) -> list[dict]:
     """List iterations (sprints/releases) for an RTC project with title and dates."""
     project_url = await oslc._resolve_project_url("ccm", project)
@@ -138,7 +152,7 @@ async def list_iterations(project: str) -> list[dict]:
     return iterations
 
 
-@tool
+@read_tool
 async def get_plan_items(project: str, plan: str | None = None, item_ids: list[str] | None = None) -> dict:
     """Get hierarchical view of Items de Backlog with their child Tarefas expanded.
 
@@ -426,7 +440,7 @@ async def delete_requirement(uri: str) -> dict:
     return await oslc.delete_requirement(uri)
 
 
-@tool
+@read_tool
 async def list_types(domain: str, project: str) -> list[dict]:
     """List resource types available in a project area.
 
@@ -446,7 +460,7 @@ async def list_types(domain: str, project: str) -> list[dict]:
     return await oslc.list_resource_shapes(domain, project)
 
 
-@tool
+@read_tool
 async def list_fields(domain: str, project: str, type: str) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
@@ -465,7 +479,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     return await oslc.list_fields(domain, project, type)
 
 
-@tool
+@read_tool
 async def inspect_workitem(id: str) -> dict:
     """Read a real work item and derive its shape/factory and filled fields.
 
@@ -477,7 +491,7 @@ async def inspect_workitem(id: str) -> dict:
     return await oslc.inspect_workitem(id)
 
 
-@tool
+@read_tool
 async def list_folders(project: str) -> list[dict]:
     """List RM (DOORS Next) folders for a project. Returns [{"title", "uri"}]."""
     return await oslc.list_folders(project)
