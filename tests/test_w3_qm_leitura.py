@@ -36,8 +36,11 @@ from elm_mcp.auth import close_client
 
 from .w3_fixtures import (
     BASE,
+    OSLC_QM_TYPES,
     OTHER_PROJECT,
+    PA,
     PROJECT,
+    QM_NS,
     QM_TYPES,
     QmServer,
     fixture_text,
@@ -45,6 +48,7 @@ from .w3_fixtures import (
     member_xml,
     mock_get_resource,
     numbers_of,
+    qm_services_xml,
     query_base,
     rm_uri,
     simple_member,
@@ -519,7 +523,7 @@ async def test_get_test_coverage_of_a_project_without_test_cases_is_empty(w2_rou
 # ======================================================================
 # get_test_results
 # ======================================================================
-VERDICT = "http://jazz.net/ns/qm/rqm/execution/verdict/"
+VERDICT = f"{BASE}/qm/oslc_qm/contexts/{PA}/shape/resource/com.ibm.rqm.execution.ExecutionResult#com.ibm.rqm.execution.common.state."
 
 
 def _result(n: int, verdict: str, passed: int, failed: int, blocked: int, case: str, ter: str) -> tuple[str, str]:
@@ -556,8 +560,9 @@ async def test_get_test_results_returns_verdict_points_and_originating_execution
     assert result["truncated"] is False
     by_n = dict(zip(numbers_of(result["items"]), result["items"], strict=True))
     assert sorted(by_n) == [1, 2, 3]
-    assert by_n[1]["verdict"].endswith("passed")
-    assert by_n[2]["verdict"].endswith("failed")
+    assert by_n[1]["verdict"].endswith("state.passed")
+    assert by_n[2]["verdict"].endswith("state.failed")
+    assert [by_n[n]["verdict_name"] for n in (1, 2, 3)] == ["passed", "failed", "passed"]
     assert by_n[2]["points"] == {"passed": 3, "failed": 2, "blocked": 1}
     assert by_n[1]["points"]["passed"] == 5
     assert by_n[2]["execution_record"] == member_uri("TestExecutionRecord", "_TER2")
@@ -577,3 +582,77 @@ async def test_get_test_results_for_a_case_without_results_is_empty(w2_router):
     QmServer(w2_router, {"TestResult": _results()})
     result = await server.get_test_results(PROJECT, test_case=member_uri("TestCase", "_NONE"))
     assert result["items"] == []
+
+
+async def test_get_test_results_zero_points_are_zero_not_none_and_missing_verdict_has_no_name(w2_router):
+    """Zeroed points come as 0 (real server); a result without verdict has verdict and verdict_name None."""
+    QmServer(
+        w2_router,
+        {
+            "TestResult": [
+                simple_member(
+                    "TestResult",
+                    1,
+                    links={"rqm_qm:verdict": [f"{VERDICT}inconclusive"]},
+                    literals={"rqm_qm:pointsPassed": "0", "rqm_qm:pointsFailed": "0", "rqm_qm:pointsBlocked": "0"},
+                ),
+                simple_member("TestResult", 2),
+            ]
+        },
+    )
+    items = (await server.get_test_results(PROJECT))["items"]
+    by_n = dict(zip(numbers_of(items), items, strict=True))
+    assert by_n[1]["verdict_name"] == "inconclusive"
+    assert by_n[1]["points"] == {"passed": 0, "failed": 0, "blocked": 0}
+    assert by_n[2]["verdict"] is None
+    assert by_n[2]["verdict_name"] is None
+
+
+# ======================================================================
+# Two namespaces for resourceType / rdf:type (oslc_qm and rqm), matched by local name
+# ======================================================================
+RQM_TYPES = [t for t in QM_TYPES if t not in OSLC_QM_TYPES]
+
+
+def test_the_fixture_mirrors_the_real_split_five_oslc_qm_nine_rqm():
+    assert len(OSLC_QM_TYPES) == 5
+    assert len(RQM_TYPES) == 9
+    assert "Keyword" in RQM_TYPES
+
+
+@pytest.mark.parametrize("type_name", RQM_TYPES)
+async def test_rqm_namespace_types_are_found_by_local_name_and_members_recognised(w2_router, type_name):
+    """Keyword, BuildRecord, ...: capability and member rdf:type live in the rqm namespace."""
+    qm = QmServer(w2_router, {type_name: _members(type_name, 2)})
+    result = await server.list_qm_resources(PROJECT, type_name)
+    assert [i["type"] for i in result["items"]] == [type_name, type_name]
+    assert qm.queried_types() == {type_name}
+
+
+async def test_two_capabilities_with_the_same_local_name_are_an_ambiguity_error(w2_router):
+    """KeywordQuery in oslc_qm AND in rqm: refuse, nothing is queried."""
+    xml = qm_services_xml(QM_TYPES).replace(
+        "</oslc:ServiceProvider>",
+        f"""<oslc:service><oslc:Service><oslc:queryCapability><oslc:QueryCapability>
+        <oslc:resourceType rdf:resource="{QM_NS}KeywordQuery"/>
+        <oslc:queryBase rdf:resource="{BASE}/qm/other/keyword"/>
+        </oslc:QueryCapability></oslc:queryCapability></oslc:Service></oslc:service></oslc:ServiceProvider>""",
+    )
+    qm = QmServer(w2_router, {"Keyword": _members("Keyword", 1)}, services_xml=xml)
+    with pytest.raises(ToolError, match="(?i)ambig"):
+        await server.list_qm_resources(PROJECT, "Keyword")
+    assert qm.queried_types() == set()
+
+
+async def test_a_foreign_namespace_with_the_same_local_name_is_not_a_capability(w2_router):
+    """Only the oslc_qm and rqm namespaces count: a ``...other#KeywordQuery`` is ignored."""
+    xml = qm_services_xml([t for t in QM_TYPES if t != "Keyword"]).replace(
+        "</oslc:ServiceProvider>",
+        f"""<oslc:service><oslc:Service><oslc:queryCapability><oslc:QueryCapability>
+        <oslc:resourceType rdf:resource="http://example.com/other#KeywordQuery"/>
+        <oslc:queryBase rdf:resource="{BASE}/qm/other/keyword"/>
+        </oslc:QueryCapability></oslc:queryCapability></oslc:Service></oslc:service></oslc:ServiceProvider>""",
+    )
+    QmServer(w2_router, services_xml=xml)
+    with pytest.raises(ToolError, match="Keyword"):
+        await server.list_qm_resources(PROJECT, "Keyword")

@@ -60,6 +60,15 @@ QM_TYPES = [
     "BuildDefinition",
 ]
 
+# The real ETM publishes the resourceType of each capability (and the rdf:type of its members) in TWO namespaces:
+# oslc_qm for these five, jazz.net rqm for the other nine.
+OSLC_QM_TYPES = {"TestExecutionRecord", "TestPlan", "TestCase", "TestScript", "TestResult"}
+
+
+def type_ns(type_name: str) -> str:
+    return QM_NS if type_name in OSLC_QM_TYPES else RQM
+
+
 # Internal path segment of each queryBase. The three real ones come from tests/fixtures/*.xml; the
 # others are neutral. The code must never hard-code these: it reads them from services.xml.
 _INTERNAL = {
@@ -120,7 +129,7 @@ QM_CATALOG_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 def qm_services_xml(types: list[str] | None = None) -> str:
-    """services.xml with one QueryCapability per type (resourceType ``qm#<Type>Query``, distinct queryBase)."""
+    """services.xml with one QueryCapability per type (resourceType ``<Type>Query`` in the real namespace of the type, distinct queryBase)."""
     chosen = QM_TYPES if types is None else types
     blocks = []
     for i, t in enumerate(chosen):
@@ -130,7 +139,7 @@ def qm_services_xml(types: list[str] | None = None) -> str:
             <oslc:QueryCapability jp06:extra="{i}" rdf:ID="qc{i}">
                 <dcterms:title>{t} Query Capability</dcterms:title>
                 <oslc:label>{t}</oslc:label>
-                <oslc:resourceType rdf:resource="{QM_NS}{t}Query"/>
+                <oslc:resourceType rdf:resource="{type_ns(t)}{t}Query"/>
                 <oslc:queryBase rdf:resource="{query_base(t)}"/>
             </oslc:QueryCapability>
         </oslc:queryCapability>"""
@@ -183,7 +192,7 @@ def member_xml(
 ) -> str:
     """One inline member: typed rdf:Description with title, identifiers, state, links and extra literals."""
     out = f' <rdf:Description rdf:about="{uri}">\n'
-    out += _res("rdf:type", f"{QM_NS}{type_name}")
+    out += _res("rdf:type", f"{type_ns(type_name)}{type_name}")
     out += f"  <dcterms:title {_STRING}>{title}</dcterms:title>\n"
     out += f"  <dcterms:identifier {_STRING}>{short_id}</dcterms:identifier>\n"
     out += f"  <rqm_qm:shortIdentifier {_STRING}>{short_id}</rqm_qm:shortIdentifier>\n"
@@ -229,7 +238,7 @@ def page_xml(
     query = f' <rdf:Description rdf:about="{base}">\n'
     for uri in member_uris:
         query += _res(f"oslc_qm:{_lower_first(type_name)}", uri)
-    query += _res("rdf:type", f"{QM_NS}{type_name}Query") + " </rdf:Description>\n"
+    query += _res("rdf:type", f"{type_ns(type_name)}{type_name}Query") + " </rdf:Description>\n"
     first, rest = (members[:1], members[1:])
     return (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF {_XMLNS}>\n'
@@ -271,6 +280,7 @@ class QmServer:
         loop_forever: bool = False,
         foreign_next_page: str | None = None,
         query_status: int | None = None,
+        services_xml: str | None = None,
     ) -> None:
         self.router = router
         self.data = data or {}
@@ -285,7 +295,7 @@ class QmServer:
         router.post(f"{BASE}/jts/j_security_check").mock(return_value=httpx.Response(200))
         self._get(f"{BASE}/qm/rootservices", QM_ROOTSERVICES_XML)
         self._get(QM_CATALOG_URL, QM_CATALOG_XML)
-        services = qm_services_xml(types_in_services)
+        services = services_xml or qm_services_xml(types_in_services)
         self._get(QM_SERVICES_XML_URL, services)
         router.get(f"{QM_CTX}/services").mock(return_value=httpx.Response(404))
         for t in QM_TYPES:
