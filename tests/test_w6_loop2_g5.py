@@ -10,7 +10,7 @@ from elm_mcp import oslc, qm_write, server
 from elm_mcp.auth import close_client
 
 from . import w6_fixtures as w6
-from .w3_fixtures import BASE, QM_NS, rm_uri, wi_uri
+from .w3_fixtures import BASE, PROJECT, QM_NS, rm_uri, wi_uri
 from .w6_fixtures import QmWriteServer, creation_url, link_targets, literal
 
 URI = w6.TESTCASE_FIXTURE_URI
@@ -117,7 +117,7 @@ async def test_update_re_reads_after_the_put_when_all_is_well(w2_router):
 async def test_location_outside_the_origin_reports_the_url_and_does_not_recreate(w2_router):
     qm = QmWriteServer(w2_router, post_status=201, post_headers={"Location": "https://evil.example.net/x/1"})
     with pytest.raises(ToolError) as exc:
-        await server.create_qm_resource("p", "TestCase", "Case with odd location")
+        await server.create_qm_resource(PROJECT, "TestCase", "Case with odd location")
     assert "https://evil.example.net/x/1" in str(exc.value)
     assert "may exist" in str(exc.value)
     assert "do not recreate" in str(exc.value)
@@ -127,7 +127,7 @@ async def test_location_outside_the_origin_reports_the_url_and_does_not_recreate
 async def test_201_without_location_says_it_may_exist_and_is_not_resent(w2_router):
     qm = QmWriteServer(w2_router, post_status=201)
     with pytest.raises(ToolError) as exc:
-        await server.create_qm_resource("p", "TestCase", "Case without location")
+        await server.create_qm_resource(PROJECT, "TestCase", "Case without location")
     assert "may exist" in str(exc.value)
     assert len(qm.posts) == 1
 
@@ -137,7 +137,7 @@ async def test_title_over_255_is_refused_in_create_and_update_without_requests(w
     qm = _seeded(w2_router)
     before = len(qm.requests)
     with pytest.raises(ToolError, match="255"):
-        await server.create_qm_resource("p", "TestCase", "t" * 256)
+        await server.create_qm_resource(PROJECT, "TestCase", "t" * 256)
     with pytest.raises(ToolError, match="255"):
         await server.update_qm_resource(URI, title="t" * 256)
     assert len(qm.requests) == before and qm.posts == [] and qm.puts == []
@@ -147,7 +147,7 @@ async def test_description_over_32768_is_refused_in_create_and_update_without_re
     qm = _seeded(w2_router)
     before = len(qm.requests)
     with pytest.raises(ToolError, match="32768"):
-        await server.create_qm_resource("p", "TestCase", "ok", description="d" * 32769)
+        await server.create_qm_resource(PROJECT, "TestCase", "ok", description="d" * 32769)
     with pytest.raises(ToolError, match="32768"):
         await server.update_qm_resource(URI, description="d" * 32769)
     assert len(qm.requests) == before and qm.posts == [] and qm.puts == []
@@ -234,7 +234,7 @@ async def test_truncated_duplicate_query_fails_closed(w2_router, monkeypatch):
 
     monkeypatch.setattr("elm_mcp.qm.query_members", truncated)
     with pytest.raises(ToolError, match="truncated"):
-        await server.create_qm_resource("p", "TestCase", "Some case")
+        await server.create_qm_resource(PROJECT, "TestCase", "Some case")
     assert qm.posts == []
 
 

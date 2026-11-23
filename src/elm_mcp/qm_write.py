@@ -18,7 +18,7 @@ import re
 import unicodedata
 from urllib.parse import urlparse
 from xml.parsers import expat
-from xml.sax.saxutils import escape, unescape
+from xml.sax.saxutils import escape
 
 import httpx
 
@@ -43,7 +43,11 @@ _RDF_TYPE = f"{{{_RDF}}}type"
 _NOT_PLAIN_TEXT = (f"{{{_RDF}}}parseType", _RDF_RESOURCE, f"{{{_RDF}}}nodeID")
 _PREFERRED_PREFIX = {_QM: ("oslc_qm",), _DCTERMS: ("dcterms",), _RDF: ("rdf",)}
 
-_QM_RESOURCE_PATH = re.compile(r"/qm/oslc_qm/contexts/[^/]+/resources/[^/]+/[^/?#]+/?$")
+_SEGMENT = r"[A-Za-z0-9_.:~-]+"
+_QM_RESOURCE_PATH = re.compile(rf"/qm/oslc_qm/contexts/{_SEGMENT}/resources/{_SEGMENT}/{_SEGMENT}")
+_SAFE_PATH = re.compile(rf"(?:/{_SEGMENT})+")
+MAX_TITLE_LENGTH = 255
+MAX_DESCRIPTION_LENGTH = 32768
 _WRITE_HEADERS = {"Content-Type": "application/rdf+xml", "Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
 _ENCODING_RE = re.compile(rb"""^\s*<\?xml[^>]*encoding\s*=\s*["']\s*(?:utf-16|utf-32|ucs-[24])""", re.IGNORECASE)
 _BOMS = (b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")
@@ -82,18 +86,35 @@ def clean_title(title: str | None) -> str:
     text = _clean_text(title or "", multiline=False).strip()
     if not text:
         raise ValueError("The title must not be empty (after removing control characters).")
+    if len(text) > MAX_TITLE_LENGTH:
+        raise ValueError(f"The title has {len(text)} characters; the maximum is {MAX_TITLE_LENGTH}.")
     return text
 
 
 def clean_description(description: str) -> str:
-    return _clean_text(description, multiline=True).strip()
+    text = _clean_text(description, multiline=True).strip()
+    if len(text) > MAX_DESCRIPTION_LENGTH:
+        raise ValueError(f"The description has {len(text)} characters; the maximum is {MAX_DESCRIPTION_LENGTH}.")
+    return text
+
+
+def _safe_path(uri: str) -> str | None:
+    """The path of ``uri`` when it is plain (no query/fragment, no '%', no '\\', no '.'/'..' segment), else None."""
+    parts = urlparse(uri)
+    path = parts.path
+    if parts.params or parts.query or parts.fragment or "%" in path or "\\" in path or "%" in uri:
+        return None
+    if not _SAFE_PATH.fullmatch(path) or any(seg in (".", "..") for seg in path.split("/")):
+        return None
+    return path
 
 
 def _check_qm_uri(uri: str) -> str:
     """The URI of a QM resource on the configured server, or ValueError (before any request)."""
     uri = (uri or "").strip()
     oslc.assert_same_origin(uri)
-    if not _QM_RESOURCE_PATH.search(urlparse(uri).path):
+    path = _safe_path(uri)
+    if path is None or not _QM_RESOURCE_PATH.fullmatch(path):
         raise ValueError(
             f"{uri} is not an ETM resource (expected .../qm/oslc_qm/contexts/<project>/resources/<type>/<id>). "
             "These tools only touch QM resources."
@@ -102,11 +123,15 @@ def _check_qm_uri(uri: str) -> str:
 
 
 def _check_target(target: str, link_type: str) -> None:
-    path = urlparse(target).path
+    path = _safe_path(target)
+    if path is None:
+        raise ValueError(
+            f"{target} is not a plain URI (no '..', '.', '%', backslash, query or fragment allowed in the path)."
+        )
     if link_type == "validatesRequirement":
-        if not re.search(r"/rm/", path) or "/qm/" in path or "/ccm/" in path:
+        if not path.startswith("/rm/") or "/qm/" in path or "/ccm/" in path:
             raise ValueError(f"{target} is not an RM requirement: validatesRequirement links a test case to one.")
-    elif not oslc._is_workitem_uri(target):
+    elif not path.startswith("/ccm/") or not oslc._is_workitem_uri(target):
         raise ValueError(
             f"{target} is not a CCM work item (expected .../ccm/.../com.ibm.team.workitem.WorkItem/<id>): "
             "testsChangeRequest links a test case to one."
@@ -124,6 +149,7 @@ class _Element:
         self.empty = False
         self.content_end = start  # index of the '<' of the end tag (non-empty elements)
         self.end = start  # index just after the element
+        self.chunks: list[str] = []  # character data decoded by expat (entities and CDATA resolved)
 
 
 class _Doc:
@@ -131,9 +157,7 @@ class _Doc:
         self.data, self.root = data, root
 
     def text(self, el: _Element) -> str:
-        if el.empty:
-            return ""
-        return unescape(self.data[el.open_end + 1 : el.content_end].decode("utf-8", "replace")).strip()
+        return "".join(el.chunks).strip()
 
 
 def _clark(name: str) -> str:
@@ -192,6 +216,10 @@ def _scan(data: bytes) -> _Doc:
             roots.append(el)
         stack.append(el)
 
+    def on_chars(text: str) -> None:
+        for el in stack:
+            el.chunks.append(text)
+
     def on_end(_name: str) -> None:
         el = stack.pop()
         if not el.empty:
@@ -202,6 +230,7 @@ def _scan(data: bytes) -> _Doc:
     parser.EntityDeclHandler = refuse
     parser.StartNamespaceDeclHandler = on_ns
     parser.StartElementHandler = on_start
+    parser.CharacterDataHandler = on_chars
     parser.EndElementHandler = on_end
     try:
         parser.Parse(data, True)
@@ -338,6 +367,11 @@ async def _read(client: httpx.AsyncClient, uri: str, operation: str) -> tuple[by
     etag = resp.headers.get("ETag", "")
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely write.")
+    if etag.lstrip().startswith("W/"):
+        raise ValueError(
+            f"The ETM sent a weak ETag ({etag}) for '{uri}'. A weak validator cannot guard a PUT (If-Match needs a "
+            "strong one), so nothing was written."
+        )
     return resp.content, etag
 
 
@@ -394,7 +428,13 @@ async def _post(factory_url: str, body: bytes) -> dict:
             f"The ETM accepted the creation ({resp.status_code}) but sent no Location, so the new resource is "
             "unknown. It may exist: check before creating it again. The request was NOT resent."
         )
-    oslc.assert_same_origin(location)
+    try:
+        oslc.assert_same_origin(location)
+    except ValueError as exc:
+        raise ValueError(
+            f"The ETM accepted the creation ({resp.status_code}) but sent a Location outside the configured server: "
+            f"{location}. The resource may exist — do not recreate it. The request was NOT resent."
+        ) from exc
     result: dict = {"uri": location, "short_id": None}
     # The resource ALREADY exists here: a failed re-read must never propagate (a retry would duplicate it).
     try:
@@ -447,6 +487,58 @@ async def create_resource(
 # ---------------------------------------------------------------------------------------------
 # update_qm_resource
 # ---------------------------------------------------------------------------------------------
+def _check_link_result(
+    body: bytes, source: str, link_type: str, wanted: list[str], children: int, before: _Doc
+) -> None:
+    """The edited body has exactly the wanted link elements and the same other properties (checked BEFORE the PUT)."""
+    try:
+        doc = _scan(body)
+        node = _subject(doc, source)
+    except ValueError as exc:
+        raise ValueError(f"Check failed on the edited body: {exc} Nothing was written.") from exc
+    got = _link_targets(node, link_type)
+    problems = []
+    if sorted(got) != sorted(wanted):
+        problems.append(f"'{link_type}' targets are {sorted(got)}, expected {sorted(wanted)}")
+    if len(node.children) != children:
+        problems.append(f"{len(node.children)} properties, expected {children}")
+    if _top_nodes(doc) != _top_nodes(before):
+        problems.append(f"{_top_nodes(doc)} top-level nodes, expected {_top_nodes(before)}")
+    if problems:
+        raise ValueError(f"Check failed on the edited body: {'; '.join(problems)}. Nothing was written.")
+
+
+def _top_nodes(doc: _Doc) -> int:
+    return len(doc.root.children) if doc.root.name == _RDF_RDF else 1
+
+
+def _check_text_result(
+    data: bytes, uri: str, expected: dict[str, str], others: int, top: int, *, written: bool
+) -> None:
+    """The edited body (``written`` False: before the PUT; True: re-read after it) has exactly the expected text."""
+    where = "the re-read of the resource after the PUT" if written else "the edited body"
+    try:
+        doc = _scan(data)
+        node = _subject(doc, uri)
+    except ValueError as exc:
+        raise ValueError(f"Check failed on {where}: {exc} {_NOT_WRITTEN[written]}") from exc
+    problems = []
+    for local, text in expected.items():
+        values = [doc.text(c) for c in node.children if c.name == f"{{{_DCTERMS}}}{local}"]
+        if values != [text]:
+            problems.append(f"'{local}' is {values!r}, expected exactly [{text!r}]")
+    rest = sum(1 for c in node.children if c.name not in {f"{{{_DCTERMS}}}{k}" for k in ("title", "description")})
+    if rest != others:
+        problems.append(f"{rest} other properties, expected {others}")
+    if _top_nodes(doc) != top:
+        problems.append(f"{_top_nodes(doc)} top-level nodes, expected {top}")
+    if problems:
+        raise ValueError(f"Check failed on {where}: {'; '.join(problems)}. {_NOT_WRITTEN[written]}")
+
+
+_NOT_WRITTEN = {False: "Nothing was written.", True: "Not retried: check the resource."}
+
+
 async def update_resource(uri: str, title: str | None = None, description: str | None = None) -> dict:
     """Change only the title and/or description: re-read, edit those properties, PUT everything with If-Match."""
     if title is None and description is None:
@@ -464,14 +556,22 @@ async def update_resource(uri: str, title: str | None = None, description: str |
             f"{uri} is a {found or 'resource of unknown type'}; update_qm_resource only changes "
             f"{', '.join(SUPPORTED_TYPES)} (the other types are deferred: adiados)."
         )
-    edits, changed = [], []
-    if new_title is not None:
-        edits.append(_set_text_edit(doc, node, _DCTERMS, "title", new_title))
-        changed.append("title")
-    if new_desc is not None:
-        edits.append(_set_text_edit(doc, node, _DCTERMS, "description", new_desc))
-        changed.append("description")
-    await _put(client, uri, _apply(data, edits), etag, "update_qm_resource")
+    edits, changed, expected = [], [], {}
+    for local, value in (("title", new_title), ("description", new_desc)):
+        if value is None:
+            continue
+        if f"{{{_DCTERMS}}}{local}" in node.attrs:
+            raise ValueError(f"The '{local}' of {uri} is an XML attribute of the node; refusing to add a second one.")
+        edits.append(_set_text_edit(doc, node, _DCTERMS, local, value))
+        changed.append(local)
+        expected[local] = value
+    others = sum(1 for c in node.children if c.name not in (f"{{{_DCTERMS}}}title", f"{{{_DCTERMS}}}description"))
+    top = _top_nodes(doc)
+    body = _apply(data, edits)
+    _check_text_result(body, uri, expected, others, top, written=False)
+    await _put(client, uri, body, etag, "update_qm_resource")
+    reread = await oslc.fetch(client, "GET", uri, "update_qm_resource", headers=qm._HEADERS)
+    _check_text_result(reread.content, uri, expected, others, top, written=True)
     return {"uri": uri, "updated": changed}
 
 
@@ -538,7 +638,18 @@ async def change_link(test_case: str, target: str, link_type: str, *, add: bool)
             if c.name == f"{{{_QM}}}{link_type}" and c.attrs.get(_RDF_RESOURCE) == target
         ]
         expected = set(current) - {target}
-    await _put(client, source, _apply(data, edits), etag, operation)
+        for top_node in doc.root.children if doc.root.name == _RDF_RDF else []:
+            if top_node.name == f"{{{_RDF}}}Statement" and any(
+                c.name == f"{{{_RDF}}}object" and c.attrs.get(_RDF_RESOURCE) == target for c in top_node.children
+            ):
+                raise ValueError(
+                    f"{source} has a reified rdf:Statement whose rdf:object is {target}: removing only the link "
+                    "element would leave that statement behind. Refusing to unlink; nothing was written."
+                )
+    body = _apply(data, edits)
+    wanted = [t for t in current if t != target] if not add else [*current, target]
+    _check_link_result(body, source, link_type, wanted, len(node.children) + len(wanted) - len(current), doc)
+    await _put(client, source, body, etag, operation)
 
     reread = await oslc.fetch(client, "GET", source, operation, headers=qm._HEADERS)
     final = set(_link_targets(_subject(_scan(reread.content), source), link_type))
