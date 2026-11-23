@@ -15,7 +15,11 @@ Discovery cache and RM query (SPEC-cache-shape, SPEC-rm-consulta, wave W4):
 
 Idempotency and local profile (SPEC-idempotencia, SPEC-perfil-template, ADR-005, wave W4):
 
-- `if_exists` (`error` | `return` | `create`) on `create_requirement`, `create_workitem` and `add_child_workitem`: a duplicate (same normalized title, type and folder or parent) is refused, returned or ignored.
+- `if_exists` (`error` | `return` | `create`) on `create_requirement`, `create_workitem` and `add_child_workitem`: a duplicate (same title, type and folder or parent) is refused, returned or ignored.
+- Duplicate check: the server compares the title exactly (case and inner spaces count); the normalization only applies to titles that come back. The query asks for 1000 items and a truncated check refuses the creation (`duplicate check truncated`, except `if_exists="create"`). Without `folder`, `create_requirement` matches a requirement in any folder (accepted false positive).
+- After a 400/409 on `create_workitem` the duplicate check runs again before the single resend; an item the server created meanwhile is returned (`created: true`, `warning`) and not duplicated.
+- `custom_fields` keys given as a full property URI are normalized to `prefix:name` before the required-field check and the write.
+- Hardening: profile files over 1 MB are refused; `list_workitems` degrades with a `warning` when the profile is malformed; a profile alias never shadows a real action; `ELM_CACHE_TTL` negative/`nan`/infinite means 300; the profile draft keeps literal defaults as literals.
 - Creation results carry `created: true|false`; a timeout after the POST queries the duplicate again and never resends the POST.
 - Local profile in JSON outside the package (`ELM_MCP_PROFILE_DIR`, default `~/.elm-mcp/profiles/`): templates plus project area overrides, with `defaults`, `action_aliases` and `hidden_states`.
 - `create_workitem` fills missing required fields from the profile and refuses, listing them, those the shape still requires.
@@ -55,7 +59,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 - `search_requirements` now returns interpreted items (`uri`, `title`, `identifier`, `type`, `modified`, `folder`) instead of the raw RDF/JSON dictionary: a deliberate change of return.
 - RM queries discover the project's stream and send `Configuration-Context`, `oslc.prefix` (dcterms, oslc, rdf, nav, jazz_rm) and `oslc.select`; a project without a stream is queried without the header.
-- `if_exists` defaults to `error`: creating a requirement or work item whose normalized title, type and folder or parent already exist is now refused. Pass `if_exists="create"` for the old behavior (deliberate incompatible change).
+- `if_exists` defaults to `error`: creating a requirement or work item whose title, type and folder or parent already exist is now refused. Pass `if_exists="create"` for the old behavior (deliberate incompatible change).
 - `create_workitem` reads the type's shape before the POST and refuses, listing them, required fields without default that neither the call nor the profile fills.
 - The CCM query base is read through the discovery cache, so a query no longer refetches the service provider.
 - `create_workitem` rediscovers the project area once and resends once when the server answers 400 or 409 (stale shape or value); 403, 404 and 500 are not retried.
