@@ -1,6 +1,6 @@
 # SPEC — Correções RM e modo changeset
 
-**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F2
+**Status:** PLANNED · **Release:** v0.6.0 (D3, D7, D8, `delete_requirement`); modo changeset ADIADO (ver abaixo) · **Guarda-chuva:** `SPEC-ewm-delta` F2
 
 ## Defeitos
 | # | Tool | Sintoma observado | Correção |
@@ -9,7 +9,10 @@
 | D7 | `create_requirement` sem `type` | 403 CRRRS6404E (falta `instanceShape`) | `type` obrigatório (URI do shape ou título resolvido por `list_types("rm")`) |
 | D8 | `create_requirement` | `identifier: null` | Reler o artefato criado e retornar `dcterms:identifier` |
 
-## Modo changeset (projetos com Configuration Management)
+## Modo changeset (projetos com Configuration Management) — ADIADO
+**Decisão do gerente (23/nov), Gate -1:** a fábrica/corpo do changeset e o método de entrega na 7.0.1 NÃO foram verificados (falta permissão e segundo projeto de referência). Implementar sem evidência é chute. O modo fica fora da v0.6.0 até haver projeto e permissão para medir; `rm_write_mode` não entra agora. A tool `delete_requirement` (modo `direct`) entra.
+
+_Desenho abaixo preservado para quando houver evidência:_
 Fato observado: escrita direta na stream é aceita quando a política do projeto permite. Criar changeset pode exigir permissão
 própria. Logo, o modo é escolha de configuração, não detecção automática.
 
