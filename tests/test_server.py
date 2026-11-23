@@ -1,11 +1,14 @@
 """Tests for MCP server tool registration."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
+import respx
 from mcp.server.mcpserver.exceptions import ToolError
 
+from elm_mcp.auth import close_client
 from elm_mcp.server import list_projects, mcp, transition_workitem
+
+from . import f1_fixtures as f1
+from .f1_fixtures import BASE
 
 VALID_DOMAINS = ("rm", "ccm", "qm")
 
@@ -36,40 +39,30 @@ def test_transition_workitem_registered():
     assert "transition_workitem" in tool_names
 
 
-@pytest.mark.asyncio
-async def test_transition_workitem_invalid_action():
-    """Invalid action should raise ToolError."""
-    with pytest.raises(ToolError, match="Invalid action"):
-        await transition_workitem(id="12345", action="invalid")
+@pytest.fixture
+async def _elm(monkeypatch):
+    monkeypatch.setattr("elm_mcp.config.settings.elm_url", BASE)
+    yield
+    await close_client()
 
 
-@pytest.mark.asyncio
-async def test_transition_workitem_success():
-    """Successful transition should return confirmation message."""
-    mock_get_resp = MagicMock()
-    mock_get_resp.status_code = 200
-    mock_get_resp.headers = {"ETag": '"etag123"'}
-    mock_get_resp.json.return_value = {
-        "dcterms:title": "Test WI",
-        "rtc_cm:state": {"rdf:resource": "http://elm/ccm/oslc/workflows/states/old"},
-    }
-    mock_get_resp.raise_for_status = MagicMock()
+@respx.mock
+async def test_transition_workitem_invalid_action(_elm):
+    """F1/D10: an action that resolves to no workflow action -> ToolError listing the available ids; no write."""
+    routes = f1.mock_workflow()
+    with pytest.raises(ToolError) as exc:
+        await transition_workitem(id=f1.WI_ID, action="invalid")
+    for action_id in f1.ACTION_IDS:
+        assert action_id in str(exc.value)
+    assert routes["put"].call_count == 0
 
-    mock_actions_resp = MagicMock()
-    mock_actions_resp.status_code = 404
-    mock_actions_resp.json.return_value = {}
 
-    mock_put_resp = MagicMock()
-    mock_put_resp.status_code = 200
-    mock_put_resp.raise_for_status = MagicMock()
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(side_effect=[mock_get_resp, mock_actions_resp])
-    mock_client.put = AsyncMock(return_value=mock_put_resp)
-
-    with patch("elm_mcp.oslc.get_client", return_value=mock_client):
-        result = await transition_workitem(id="12345", action="resolve")
-
-    assert "12345" in result
-    assert "resolve" in result
-    mock_client.put.assert_called_once()
+@respx.mock
+async def test_transition_workitem_success(_elm):
+    """F1/D10: successful transition returns 'Work item {id}: {from} -> {to} (action: {id})'."""
+    routes = f1.mock_workflow()
+    result = await transition_workitem(id=f1.WI_ID, action="startWorking")
+    action_id = f1.ACTION_PREFIX + "startWorking"
+    assert result == f"Work item {f1.WI_ID}: Idea -> In Progress (action: {action_id})"
+    assert routes["put"].call_count == 1
+    assert routes["put"].calls[0].request.url.params.get("_action") == action_id

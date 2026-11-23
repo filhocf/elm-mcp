@@ -30,16 +30,20 @@ Conventions: pytest + respx, asyncio_mode=auto (AGENTS.md).
 #     collection time -> the whole module is RED. Do NOT wrap in try/except;
 #     the collection error IS the intended RED signal. ---
 import pytest
+import respx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from elm_mcp import server
+from elm_mcp.auth import close_client
 from elm_mcp.server import (
     create_workitem,
     list_projects,
     transition_workitem,
     update_workitem,
 )
+
+from . import f1_fixtures as f1
 
 # =============================================================================
 # F1 — Boot / smoke: the server runs on the 2.x API (MCPServer), not FastMCP.
@@ -145,13 +149,21 @@ async def test_update_workitem_no_fields_raises_toolerror():
         await update_workitem(id="1")
 
 
-async def test_transition_workitem_invalid_action_raises_toolerror():
-    """server.py L341: bad workflow action -> ToolError (was ValueError).
+@respx.mock
+async def test_transition_workitem_invalid_action_raises_toolerror(monkeypatch):
+    """F1/D10: an action unknown to the item's workflow -> ToolError (not ValueError) listing the ids.
 
-    RED now: raises plain ValueError on action='invalid'.
+    RED pre-F1: the fixed-word validation raises 'Invalid action' without ever reading the workflow.
     """
-    with pytest.raises(ToolError, match="Invalid action"):
-        await transition_workitem(id="12345", action="invalid")
+    monkeypatch.setattr("elm_mcp.config.settings.elm_url", f1.BASE)
+    try:
+        routes = f1.mock_workflow()
+        with pytest.raises(ToolError) as exc:
+            await transition_workitem(id=f1.WI_ID, action="invalid")
+        assert f1.ACTION_PREFIX + "a12" in str(exc.value)
+        assert routes["put"].call_count == 0
+    finally:
+        await close_client()
 
 
 def test_toolerror_is_not_valueerror_subclass():

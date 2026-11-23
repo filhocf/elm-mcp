@@ -34,14 +34,28 @@ CCM_SERVICES_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
     xmlns:oslc="http://open-services.net/ns/core#"
     xmlns:dcterms="http://purl.org/dc/terms/">
     <oslc:CreationFactory>
-        <dcterms:title>defect</dcterms:title>
+        <dcterms:title>Location for creation of Defect change requests </dcterms:title>
         <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
-        <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems"/>
+        <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/defect"/>
+        <oslc:resourceShape rdf:resource="{BASE}/ccm/oslc/context/_MWxBEJB7Ee-fe_bes9r78g/shapes/workitems/defect"/>
     </oslc:CreationFactory>
     <oslc:CreationFactory>
-        <dcterms:title>task</dcterms:title>
+        <dcterms:title>Location for creation of Task change requests </dcterms:title>
+        <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
+        <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task"/>
+        <oslc:resourceShape rdf:resource="{BASE}/ccm/oslc/context/_MWxBEJB7Ee-fe_bes9r78g/shapes/workitems/task"/>
+    </oslc:CreationFactory>
+    <oslc:CreationFactory>
+        <dcterms:title>Location for creation of Story change requests </dcterms:title>
+        <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
+        <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/com.ibm.team.apt.workItemType.story"/>
+        <oslc:resourceShape rdf:resource="{BASE}/ccm/oslc/context/_MWxBEJB7Ee-fe_bes9r78g/shapes/workitems/story"/>
+    </oslc:CreationFactory>
+    <oslc:CreationFactory>
+        <dcterms:title>Location for creation of Defect change requests </dcterms:title>
         <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
         <oslc:creation rdf:resource="{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems"/>
+        <oslc:resourceShape rdf:resource="{BASE}/ccm/oslc/context/_MWxBEJB7Ee-fe_bes9r78g/shapes/workitems/defect"/>
     </oslc:CreationFactory>
 </rdf:RDF>
 """
@@ -75,12 +89,6 @@ def _mock_ccm_discovery():
     respx.get(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
         return_value=httpx.Response(200, json={})
     )
-    respx.get(f"{BASE}/ccm/oslc/categories").mock(
-        return_value=httpx.Response(
-            200,
-            json={"oslc:results": [{"rdf:about": f"{BASE}/ccm/oslc/categories/_MWxBEJB7Ee-fe_bes9r78g/default"}]},
-        )
-    )
 
 
 @respx.mock
@@ -97,17 +105,23 @@ async def test_create_resource():
 async def test_update_resource():
     _mock_auth()
     uri = f"{BASE}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/42"
-    respx.get(uri).mock(return_value=httpx.Response(200, json=CREATED_WI, headers={"ETag": '"abc123"'}))
     updated = {**CREATED_WI, "dcterms:title": "Updated Title"}
-    respx.put(uri).mock(return_value=httpx.Response(200, json=updated))
+    # F1/D11: the return value is the re-read item (second GET), not the partial PUT response.
+    respx.get(uri).mock(
+        side_effect=[
+            httpx.Response(200, json=CREATED_WI, headers={"ETag": '"abc123"'}),
+            httpx.Response(200, json=updated, headers={"ETag": '"abc124"'}),
+        ]
+    )
+    respx.put(uri).mock(return_value=httpx.Response(200, json={"rdf:about": uri}))
     result = await oslc.update_resource(uri, {"dcterms:title": "Updated Title"})
-    assert result["dcterms:title"] == "Updated Title"
+    assert result.get("dcterms:title") == "Updated Title"
 
 
 @respx.mock
 async def test_create_workitem_tool():
     _mock_ccm_discovery()
-    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
+    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(project="MY PROJECT (KEY)", title="New Task", type="task")
@@ -117,7 +131,7 @@ async def test_create_workitem_tool():
 @respx.mock
 async def test_create_workitem_with_parent():
     _mock_ccm_discovery()
-    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
+    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(project="MY PROJECT (KEY)", title="Child Task", type="task", parent_id="10")
@@ -128,17 +142,22 @@ async def test_create_workitem_with_parent():
 async def test_update_workitem_tool():
     _mock_auth()
     uri = f"{BASE}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/42"
-    respx.get(uri).mock(return_value=httpx.Response(200, json=CREATED_WI, headers={"ETag": '"etag1"'}))
     updated = {**CREATED_WI, "dcterms:title": "New Title"}
-    respx.put(uri).mock(return_value=httpx.Response(200, json=updated))
+    respx.get(uri).mock(
+        side_effect=[
+            httpx.Response(200, json=CREATED_WI, headers={"ETag": '"etag1"'}),
+            httpx.Response(200, json=updated, headers={"ETag": '"etag2"'}),
+        ]
+    )
+    respx.put(uri).mock(return_value=httpx.Response(200, json={"rdf:about": uri}))
     result = await update_workitem(id="42", title="New Title")
-    assert result["dcterms:title"] == "New Title"
+    assert result.get("dcterms:title") == "New Title"
 
 
 @respx.mock
 async def test_add_child_workitem_tool():
     _mock_ccm_discovery()
-    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
+    respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await add_child_workitem(parent_id="10", title="Sub-task", project="MY PROJECT (KEY)")
@@ -196,9 +215,11 @@ async def test_update_resource_put_412():
     _mock_auth()
     uri = f"{BASE}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/99"
     respx.get(uri).mock(return_value=httpx.Response(200, json=CREATED_WI, headers={"ETag": '"e1"'}))
-    respx.put(uri).mock(return_value=httpx.Response(412, text="Precondition Failed"))
-    with pytest.raises(httpx.HTTPStatusError):
+    put_route = respx.put(uri).mock(return_value=httpx.Response(412, text="Precondition Failed"))
+    # F1/D11: 412 is reported as an ETag conflict (was a bare HTTPStatusError).
+    with pytest.raises(ValueError, match=r"(?i)conflit|conflict"):
         await oslc.update_resource(uri, {"dcterms:title": "X"})
+    assert put_route.call_count == 1
 
 
 @respx.mock
@@ -332,7 +353,7 @@ async def test_create_workitem_with_custom_fields():
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
     # Capture the POST body to verify custom fields are included
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(
@@ -353,7 +374,7 @@ async def test_create_workitem_without_custom_fields():
     """Without custom_fields, no extra fields should be injected. plannedFor only if iteration found."""
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(
@@ -377,17 +398,20 @@ ITERATION_OID = "_361O8T5XEfGJQth8TJaPLA"
 
 
 @respx.mock
-async def test_golden_creation_url_is_workitems_not_defect():
-    """Factory URL must be /workitems (not /workitems or /workitems/task)."""
+async def test_golden_creation_url_is_the_type_factory_not_the_generic_one():
+    """F1/D9: the POST goes to the factory OF THE TYPE (…/workitems/task), never the generic …/workitems."""
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    # The POST must go to /workitems — NOT /workitems
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
+        return_value=httpx.Response(201, json=CREATED_WI)
+    )
+    generic_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
     assert result["dcterms:identifier"] == "42"
-    assert post_route.called
+    assert post_route.call_count == 1
+    assert generic_route.call_count == 0
 
 
 @respx.mock
@@ -395,7 +419,7 @@ async def test_golden_content_type_is_rdf_xml():
     """POST Content-Type must be application/rdf+xml."""
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
@@ -404,33 +428,28 @@ async def test_golden_content_type_is_rdf_xml():
 
 @respx.mock
 async def test_golden_category_uses_itemoid_format():
-    """filedAgainst must use /resource/itemOid/com.ibm.team.workitem.Category/{oid} format."""
-    _mock_auth()
-    respx.get(f"{BASE}/ccm/rootservices").mock(return_value=httpx.Response(200, text=CCM_ROOTSERVICES_XML))
-    respx.get(f"{BASE}/ccm/oslc/workitems/catalog").mock(return_value=httpx.Response(200, text=CCM_CATALOG_XML))
-    respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/services").mock(
-        return_value=httpx.Response(200, text=CCM_SERVICES_XML)
+    """An explicit filed_against in /resource/itemOid/com.ibm.team.workitem.Category/{oid} format
+    is sent as is; the shape default is ignored (D13 revised)."""
+    _mock_ccm_discovery()
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
+        return_value=httpx.Response(201, json=CREATED_WI)
     )
-    # Category API must return itemOid format
-    respx.get(f"{BASE}/ccm/oslc/categories").mock(
-        return_value=httpx.Response(
-            200,
-            json={
-                "oslc:results": [
-                    {"rdf:about": f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}"}
-                ]
-            },
-        )
-    )
-    respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    # Session refresh GET (create_resource does this before POST)
-    respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(return_value=httpx.Response(200, json={}))
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    category = f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}"
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", filed_against=category)
+    body = post_route.calls[0].request.content.decode()
+    assert f"resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}" in body
+    assert "/categories/_MWxBEJB7Ee-fe_bes9r78g/default" not in body
+
+
+@respx.mock
+async def test_create_workitem_without_filed_against_omits_it_and_ignores_shape_default():
+    """No filed_against -> body has no filedAgainst (decoy shape default not used)."""
+    _mock_ccm_discovery()
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
-    body = post_route.calls[0].request.content.decode()
-    assert f"resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}" in body
+    assert "filedAgainst" not in post_route.calls[0].request.content.decode()
 
 
 @respx.mock
@@ -438,7 +457,7 @@ async def test_golden_custom_fields_as_rdf_resource():
     """custom_fields with rdf:resource values must render as rdf:resource attributes in XML."""
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(
@@ -462,7 +481,7 @@ async def test_golden_type_id_is_task_not_requirementchangerequest():
     """rtc_cm:type URI must use 'task' (not 'requirementChangeRequest' which is the calm:id)."""
     _mock_ccm_discovery()
     respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
@@ -490,7 +509,7 @@ async def test_golden_plannedfor_iteration_format():
             },
         )
     )
-    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
@@ -506,11 +525,16 @@ async def test_update_workitem_owner():
     """owner parameter must set dcterms:contributor with rdf:resource."""
     _mock_auth()
     uri = f"{BASE}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/42"
-    respx.get(uri).mock(return_value=httpx.Response(200, json=CREATED_WI, headers={"ETag": '"e1"'}))
     updated = {**CREATED_WI, "dcterms:contributor": {"rdf:resource": f"{BASE}/jts/users/jdoe"}}
-    put_route = respx.put(uri).mock(return_value=httpx.Response(200, json=updated))
+    respx.get(uri).mock(
+        side_effect=[
+            httpx.Response(200, json=CREATED_WI, headers={"ETag": '"e1"'}),
+            httpx.Response(200, json=updated, headers={"ETag": '"e2"'}),
+        ]
+    )
+    put_route = respx.put(uri).mock(return_value=httpx.Response(200, json={"rdf:about": uri}))
     result = await update_workitem(id="42", owner="jdoe")
-    assert result["dcterms:contributor"]["rdf:resource"] == f"{BASE}/jts/users/jdoe"
+    assert result.get("dcterms:contributor") == {"rdf:resource": f"{BASE}/jts/users/jdoe"}
     body = put_route.calls[0].request.content
     import json as _json
 

@@ -4,6 +4,7 @@ import functools
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
+from urllib.parse import quote
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -101,10 +102,7 @@ async def search_testcases(project: str, query: str | None = None) -> list[dict]
     return await oslc.query_resources("qm", project, query)
 
 
-TYPE_IDS = {
-    "task": "task",
-    "story": "com.ibm.team.apt.workItemType.story",
-}
+TYPE_IDS = oslc.CCM_TYPE_IDS
 
 
 @tool
@@ -255,19 +253,17 @@ async def create_workitem(
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
         title: Work item title (required)
-        type: "task" or "story" (default: "task")
+        type: "task" or "story" (default: "task"). Other types from list_types are not accepted yet (SPEC-wi-custom-types).
         description: HTML description (optional)
         parent_id: Parent work item ID (optional)
-        owner: Username of the owner (optional, e.g., "jdoe")
-        filed_against: Category URI (optional). If not provided, discovers default from project.
+        owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
+        filed_against: Category URI (optional). If not provided, the property is not sent and the server applies its own default. Valid values: list_fields (property filedAgainst, allowedValues).
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
     if type not in TYPE_IDS:
         raise ToolError(f"Invalid type '{type}'. Must be one of: {list(TYPE_IDS.keys())}")
     project_url = await oslc._resolve_project_url("ccm", project)
-    # project_url may be .../contexts/{id}/workitems/services.xml — extract the context ID
-    parts = project_url.split("/contexts/")
-    project_area_id = parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
+    project_area_id = oslc._project_area_id(project_url)
     payload: dict = {
         "dcterms:title": title,
         "dcterms:type": "http://open-services.net/ns/cm#ChangeRequest",
@@ -280,9 +276,7 @@ async def create_workitem(
             {"rdf:resource": f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{parent_id}"}
         ]
     if owner:
-        payload["rtc_cm:ownedBy"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{owner}"}
-    if not filed_against:
-        filed_against = await oslc._find_default_category(project_url)
+        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner, safe='')}"}
     if filed_against:
         payload["rtc_cm:filedAgainst"] = {"rdf:resource": filed_against}
     # Auto-discover current iteration
@@ -305,7 +299,7 @@ async def update_workitem(
     planned_for: str | None = None,
     custom_fields: dict | None = None,
 ) -> dict:
-    """Update fields of an existing work item via OSLC PUT.
+    """Update fields of an existing work item via a partial OSLC PUT (only the given fields are sent).
 
     Args:
         id: Work item ID (number)
@@ -314,7 +308,7 @@ async def update_workitem(
         owner: Username to assign (e.g., "jdoe")
         estimate_hours: Estimate in hours (e.g., 8 = 8h)
         planned_for: Iteration URI (e.g., from get_workitem response)
-        custom_fields: Dict of extra fields to merge into PUT payload
+        custom_fields: Dict of extra properties to send (each key is listed in oslc.properties)
     """
     payload: dict = {}
     if title is not None:
@@ -322,9 +316,7 @@ async def update_workitem(
     if description is not None:
         payload["dcterms:description"] = description
     if owner is not None:
-        from urllib.parse import quote
-
-        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner)}"}
+        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner, safe='')}"}
     if estimate_hours is not None:
         payload["rtc_cm:estimate"] = int(estimate_hours * 3600000)
     if planned_for is not None:
@@ -359,70 +351,21 @@ async def add_child_workitem(
 
 @tool
 async def transition_workitem(id: str, action: str) -> str:
-    """Transition a work item's workflow state.
+    """Transition a work item's workflow state by executing a workflow action.
 
     Args:
         id: Work item ID
-        action: One of: start, resolve, close, reopen
+        action: Id (or id suffix, e.g. "a27") of a workflow action of the item's workflow.
+            A unique case-insensitive substring also works (e.g. "start" for an id such as
+            "...action.startWorking"). Words like start/resolve/close/reopen only work where
+            the workflow's action ids contain them. If it does not resolve to exactly one
+            action, the error lists the available action ids.
+
+    Returns "Work item {id}: {previous state} -> {new state} (action: {action id})".
     """
-    valid_actions = ("start", "resolve", "close", "reopen")
-    if action not in valid_actions:
-        raise ToolError(f"Invalid action '{action}'. Must be one of: {valid_actions}")
-
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
-    client = await oslc.get_client()
-
-    # GET current state + ETag
-    get_resp = await client.get(uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    get_resp.raise_for_status()
-    etag = get_resp.headers.get("ETag", "")
-    if not etag:
-        raise ToolError(f"Server did not return an ETag for work item {id}")
-
-    current = get_resp.json()
-
-    # Discover available actions from workflow
-    actions_url = f"{uri}/rtc_cm:workflowActions"
-    actions_resp = await client.get(actions_url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-
-    target_state_uri = None
-    if actions_resp.status_code == 200:
-        actions_data = actions_resp.json()
-        workflow_actions = actions_data.get("rtc_cm:actions", [])
-        if isinstance(workflow_actions, dict):
-            workflow_actions = [workflow_actions]
-        for wa in workflow_actions:
-            wa_id = (wa.get("dcterms:identifier") or "").lower()
-            if action in wa_id:
-                result_state = wa.get("rtc_cm:resultState") or {}
-                target_state_uri = result_state.get("rdf:resource", "")
-                break
-
-    # Fallback: hardcoded common RTC state mappings
-    if not target_state_uri:
-        base = f"{settings.elm_url}/ccm/oslc/workflows"
-        state_map = {
-            "start": f"{base}/states/com.ibm.team.workitem.taskWorkflow/2",
-            "resolve": f"{base}/states/com.ibm.team.workitem.taskWorkflow/3",
-            "close": f"{base}/states/com.ibm.team.workitem.taskWorkflow/4",
-            "reopen": f"{base}/states/com.ibm.team.workitem.taskWorkflow/1",
-        }
-        target_state_uri = state_map[action]
-
-    # PUT with updated state
-    current["rtc_cm:state"] = {"rdf:resource": target_state_uri}
-    resp = await client.put(
-        uri,
-        json=current,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "OSLC-Core-Version": "2.0",
-            "If-Match": etag,
-        },
-    )
-    resp.raise_for_status()
-    return f"Work item {id} transitioned to '{action}' (state: {target_state_uri})"
+    result = await oslc.transition_workitem(uri, action)
+    return f"Work item {id}: {result['from']} -> {result['to']} (action: {result['action']})"
 
 
 @tool
@@ -467,13 +410,17 @@ async def update_requirement(
 
 @tool
 async def list_types(domain: str, project: str) -> list[dict]:
-    """List resource types (shapes) available in a project area, with each shape URI.
+    """List resource types available in a project area.
 
     Args:
         domain: rm (DOORS Next) | ccm (RTC) | qm (ETM)
         project: Project name (as shown by list_projects)
 
-    Returns [{"title", "shape_uri", "resource_type"}].
+    Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
+    creation factory of a work item type:
+    [{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]
+    ("id" is valid for list_fields; create_workitem accepts only "task" or "story" for now.
+    Arbitrary types are planned in SPEC-wi-custom-types.)
     """
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
@@ -488,9 +435,11 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     Args:
         domain: rm | ccm | qm
         project: Project name
-        type: Shape title (as shown by list_types); matched case-insensitively
+        type: Shape title (as shown by list_types); matched case-insensitively.
+            For ccm: the type id or title from list_types, or the alias task/story.
 
-    Returns {"type", "shape_uri", "required":[...], "optional":[...]}.
+    Returns {"type", "shape_uri", "required":[...], "optional":[...]}; each field has
+    name, title, occurs, read_only, property_uri, range_uri and allowed_values.
     """
     domain = domain.lower()
     if domain not in VALID_DOMAINS:

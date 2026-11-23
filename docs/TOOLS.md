@@ -24,8 +24,8 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
-| `list_types`       | `(domain, project)` | List resource types (shapes) available in a project area. Returns `[{"title", "shape_uri", "resource_type"}]`. |
-| `list_fields`      | `(domain, project, type)` | List required/optional fields of a type, with `allowedValues` when the field is enumerated. `type` is a shape title from `list_types` (case-insensitive). Returns `{"type", "shape_uri", "required":[...], "optional":[...]}`. |
+| `list_types`       | `(domain, project)` | List resource types available in a project area. `rm`/`qm`: `[{"title", "shape_uri", "resource_type"}]`. `ccm`: one item per work item type creation factory, `[{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]`; `id` is the type id used by `list_fields` and `create_workitem`. |
+| `list_fields`      | `(domain, project, type)` | List required/optional fields of a type, with `allowedValues` when the field is enumerated. `type` is a shape title from `list_types` (case-insensitive); for `ccm` it is the type `id` or `title` from `list_types`, or the alias `task`/`story`. Returns `{"type", "shape_uri", "required":[...], "optional":[...]}`; each field has `name`, `title`, `occurs` (e.g. `Exactly-one`), `read_only`, `property_uri`, `range_uri` and `allowed_values`. |
 | `inspect_workitem` | `(id)` | Read a real work item and derive its shape/factory URIs and filled fields. Returns `{"id", "type", "shape_uri", "factory_uri", "fields":{...}}`. Useful to learn a project area's concrete field values from an existing item. |
 | `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project. Returns `[{"title", "uri"}]`. System folders (root, query results) are filtered out. |
 
@@ -40,10 +40,10 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
-| `create_workitem`     | `(project, title, type="task", description=None, parent_id=None, owner=None, filed_against=None, custom_fields=None)` | Create a work item. `type` is `task` or `story`. Category/iteration auto-discovered if omitted. |
-| `update_workitem`     | `(id, title=None, description=None, owner=None, estimate_hours=None, planned_for=None, custom_fields=None)` | Update fields via ETag-based PUT. |
+| `create_workitem`     | `(project, title, type="task", description=None, parent_id=None, owner=None, filed_against=None, custom_fields=None)` | Create a work item by POSTing to the creation factory of the type. `type` is `task` or `story`. `owner` is stored in `dcterms:contributor`. If `filed_against` is omitted, it is not sent and the server applies its own default; the iteration is auto-discovered. A refused creation surfaces the server's message in the error, with a `list_fields` hint when it concerns the category. |
+| `update_workitem`     | `(id, title=None, description=None, owner=None, estimate_hours=None, planned_for=None, custom_fields=None)` | Partial update: PUTs only the given properties (`?oslc.properties=...`) with `If-Match`. A stale ETag (412) is reported as a conflict. `owner` is stored in `dcterms:contributor`. |
 | `add_child_workitem`  | `(parent_id, title, type="task", description=None, owner=None, project=...)` | Create a work item linked as a child of `parent_id`. |
-| `transition_workitem` | `(id, action)` | Move a work item through its workflow. `action` ∈ `start`, `resolve`, `close`, `reopen`. |
+| `transition_workitem` | `(id, action)` | Execute a workflow action on a work item (`PUT ?_action=<id>`) and re-read its state. `action` is the id of a workflow action, its id suffix (e.g. `a27`), or a unique case-insensitive substring of the id; `start`/`resolve`/`close`/`reopen` work only where the workflow's action ids contain those words. An unresolved or ambiguous `action` lists the available ids; an action that does not change the state is an error. Returns `Work item {id}: {from} -> {to} (action: {action id})`. |
 
 ## Notes
 

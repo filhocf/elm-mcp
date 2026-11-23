@@ -1,5 +1,6 @@
 """OSLC service discovery and query builder for IBM ELM."""
 
+import html as _html
 import logging
 import re as _re
 from xml.etree import ElementTree as ET
@@ -229,30 +230,6 @@ async def get_resource(uri: str) -> dict:
     return await _get_json(client, uri)
 
 
-async def _find_default_category(project_url: str) -> str | None:
-    """Discover the default category (filedAgainst) for a CCM project area."""
-    client = await get_client()
-    # RTC exposes categories at /ccm/oslc/categories?projectArea={id}
-    project_area_id = project_url.rstrip("/").split("/")[-1]
-    categories_url = f"{settings.elm_url}/ccm/oslc/categories?projectArea={project_area_id}"
-    try:
-        resp = await client.get(
-            categories_url,
-            headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # Categories are in the response; pick the first (default) one
-        members = data.get("oslc:results", data.get("rdfs:member", []))
-        if members and isinstance(members, list):
-            first = members[0]
-            # Return the rdf:about URI of the category
-            return first.get("rdf:about", first.get("rdf:resource"))
-    except Exception as exc:  # noqa: BLE001 — discovery is best-effort, degrade to None
-        logger.debug("Iteration discovery failed: %s", exc)
-    return None
-
-
 async def _find_current_iteration(project_url: str) -> str | None:
     """Discover the current iteration (plannedFor) for a CCM project area.
 
@@ -328,21 +305,84 @@ def _payload_to_rdfxml(payload: dict) -> str:
     return f"<rdf:RDF {ns_decls}>\n<oslc_cm:ChangeRequest>\n{body}\n</oslc_cm:ChangeRequest>\n</rdf:RDF>"
 
 
+def _project_area_id(project_url: str) -> str:
+    """Extract the project area (context) id from a service provider URL.
+
+    The URL may be .../contexts/{id}, .../contexts/{id}/workitems/services.xml, or end in the id.
+    """
+    parts = project_url.split("/contexts/")
+    return parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
+
+
+def _write_message(resp: httpx.Response) -> str | None:
+    """Extract the server's oslc:message (JSON, or XML as a fallback) from a refused write."""
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("oslc:message"), str) and data["oslc:message"].strip():
+        return data["oslc:message"].strip()
+    m = _re.search(r"<\w*:?message\b[^>]*>([^<]+)</\w*:?message>", resp.text or "")
+    return m.group(1).strip() if m else None
+
+
+def _raise_write_error(resp: httpx.Response) -> None:
+    """Raise a readable ValueError for a refused write that carries an oslc:message.
+
+    The @tool boundary only translates ValueError/RuntimeError, so the server's message
+    must leave this module as one of them. Without a message, falls back to the HTTP error.
+    """
+    message = _write_message(resp)
+    if message:
+        hint = ""
+        if _re.search(r"filed\s*against|categor", message, _re.IGNORECASE):
+            hint = " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
+        raise ValueError(f"Server refused the write ({resp.status_code}): {message}{hint}")
+    resp.raise_for_status()
+    raise RuntimeError(f"Unexpected response status {resp.status_code}")
+
+
+# CCM type aliases accepted by create_workitem/list_fields. Any other type must come from list_types.
+CCM_TYPE_IDS = {
+    "task": "task",
+    "story": "com.ibm.team.apt.workItemType.story",
+}
+
+
+def _resolve_ccm_type(factories: list[dict], type_arg: str) -> dict:
+    """Pick the typed factory for a type id, title (case-insensitive) or alias (task/story)."""
+    wanted = type_arg.strip()
+    match = next((f for f in factories if f["id"] == wanted), None)
+    if match is None:
+        match = next((f for f in factories if (f["title"] or "").lower() == wanted.lower()), None)
+    if match is None:
+        alias = CCM_TYPE_IDS.get(wanted.lower())
+        match = next((f for f in factories if alias and f["id"] == alias), None)
+    if match is None:
+        available = [f"{f['id']} ({f['title']})" for f in factories]
+        raise ValueError(f"Type '{type_arg}' not found. Available: {available}")
+    return match
+
+
 async def create_resource(domain: str, project: str, payload: dict, wi_type: str | None = None) -> dict:
-    """POST a new resource (RDF/XML) to the creation factory."""
+    """POST a new resource (RDF/XML) to the creation factory.
+
+    With wi_type, the POST goes to the factory of that type (id, title or alias); the
+    generic /workitems factory is only used when no type is given.
+    """
     if domain != "ccm":
         raise NotImplementedError(f"create_resource only supports 'ccm' domain, got '{domain}'")
     project_url = await _resolve_project_url(domain, project)
-    # Extract projectAreaId from URL (may contain /workitems/services.xml suffix)
-    parts = project_url.split("/contexts/")
-    project_area_id = parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
-    # Creation URL is always /workitems — the dc:type in payload differentiates WI type
-    creation_url = f"{settings.elm_url}/ccm/oslc/contexts/{project_area_id}/workitems"
+    generic_url = f"{settings.elm_url}/ccm/oslc/contexts/{_project_area_id(project_url)}/workitems"
+    creation_url = generic_url
+    if wi_type:
+        factories = await _list_ccm_creation_factories(project_url)
+        creation_url = _resolve_ccm_type(factories, wi_type)["factory_uri"]
     client = await get_client()
     rdfxml_body = _payload_to_rdfxml(payload)
-    # Refresh session (prevents CSRF stale after idle)
+    # Refresh session (prevents CSRF stale after idle); any authenticated GET works, keep the generic URL
     await client.get(
-        creation_url,
+        generic_url,
         headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
     )
     post_headers = {
@@ -351,33 +391,44 @@ async def create_resource(domain: str, project: str, payload: dict, wi_type: str
         "OSLC-Core-Version": "2.0",
     }
     resp = await client.post(creation_url, content=rdfxml_body, headers=post_headers)
-    if resp.status_code in (401, 403) or "j_security_check" in str(resp.headers.get("location", "")):
+    # Re-authenticate (once) on an expired session: 401, login redirect, or a 403 without
+    # oslc:message (stale CSRF/session). A 403 with oslc:message is the server's business rule
+    # and must not be resent.
+    if (
+        resp.status_code == 401
+        or "j_security_check" in str(resp.headers.get("location", ""))
+        or (resp.status_code == 403 and _write_message(resp) is None)
+    ):
         from .auth import _authenticate
 
         await _authenticate(client)
         resp = await client.post(creation_url, content=rdfxml_body, headers=post_headers)
     if resp.status_code != 201:
-        resp.raise_for_status()
-        raise RuntimeError(f"Expected 201 Created, got {resp.status_code}")
+        _raise_write_error(resp)
     return resp.json()
 
 
 async def update_resource(uri: str, payload: dict) -> dict:
-    """PUT updated fields to an existing resource (with ETag)."""
+    """Partially update a resource: PUT only the changed properties (with If-Match).
+
+    Sends ?oslc.properties=<changed props> and a body with just those properties, then
+    returns the re-read resource.
+    """
     client = await get_client()
-    # GET full resource to obtain ETag and current state
+    # GET to obtain the ETag (and the prefix map, reused so custom prefixes resolve)
     get_resp = await client.get(uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
     get_resp.raise_for_status()
     etag = get_resp.headers.get("ETag", "")
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely update.")
-    # Merge payload into full resource
-    current = get_resp.json()
-    merged = {**current, **payload}
-    # PUT with If-Match
+    body = dict(payload)
+    prefixes = get_resp.json().get("prefixes")
+    if isinstance(prefixes, dict):
+        body["prefixes"] = prefixes
     resp = await client.put(
         uri,
-        json=merged,
+        params={"oslc.properties": ",".join(payload)},
+        json=body,
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -385,8 +436,146 @@ async def update_resource(uri: str, payload: dict) -> dict:
             "If-Match": etag,
         },
     )
-    resp.raise_for_status()
-    return resp.json()
+    _check_put(resp)
+    return await _get_json(client, uri)
+
+
+def _check_put(resp: httpx.Response) -> None:
+    """Map a refused conditional PUT to a readable error (412 = ETag conflict)."""
+    if resp.status_code == 412:
+        raise ValueError(
+            "Conflict: the item was changed by someone else since it was read (stale ETag); re-read it and try again."
+        )
+    if resp.status_code >= 400:
+        _raise_write_error(resp)
+
+
+_STATE_URI_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/]+)/([^/?#]+)$")
+
+
+def _last_segment(uri: str) -> str:
+    """Last path (or fragment) segment of a URI, e.g. .../core#Exactly-one -> Exactly-one."""
+    return _re.split(r"[/#]", uri.rstrip("/"))[-1]
+
+
+_MIN_ACTION_MATCH_LEN = 2
+
+
+def _resolve_workflow_action(action: str, action_ids: list[str]) -> str:
+    """Resolve `action` to one workflow action id: exact, then '.{action}' suffix, then unique substring.
+
+    Blank input is refused and suffix/substring matching needs at least 2 characters, so a
+    trivial value cannot match (and execute) an arbitrary action.
+    """
+    action = action.strip()
+    if not action:
+        raise ValueError(f"Action must not be empty. Available actions: {action_ids}")
+    if action in action_ids:
+        return action
+    if len(action) < _MIN_ACTION_MATCH_LEN:
+        raise ValueError(
+            f"Action '{action}' is too short to match by suffix or substring "
+            f"(min {_MIN_ACTION_MATCH_LEN} characters). Available actions: {action_ids}"
+        )
+    suffixed = [a for a in action_ids if a.endswith(f".{action}")]
+    if len(suffixed) == 1:
+        return suffixed[0]
+    if not suffixed:
+        needle = action.lower()
+        contained = [a for a in action_ids if needle in a.lower()]
+        if len(contained) == 1:
+            return contained[0]
+        suffixed = contained
+    if suffixed:
+        raise ValueError(f"Action '{action}' is ambiguous. Matching actions: {suffixed}")
+    raise ValueError(f"Action '{action}' not found for this work item's workflow. Available actions: {action_ids}")
+
+
+def _action_ids(data: dict) -> list[str]:
+    """Extract action ids (last URI segment) from the workflow actions listing."""
+    members = data.get("oslc:results", data.get("rdfs:member", []))
+    ids: list[str] = []
+    for m in members if isinstance(members, list) else []:
+        if not isinstance(m, dict):
+            continue
+        uri = m.get("rdf:about") or m.get("rdf:resource")
+        ident = m.get("dcterms:identifier") or (_last_segment(uri) if uri else None)
+        if ident:
+            ids.append(ident)
+    return ids
+
+
+async def _state_titles(client: httpx.AsyncClient, states_url: str) -> dict[str, str]:
+    """Map state id -> dcterms:title from the workflow states listing (best effort)."""
+    try:
+        resp = await client.get(states_url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+        if resp.status_code != 200:
+            return {}
+        members = resp.json().get("oslc:results", [])
+    except (httpx.HTTPError, ValueError):
+        return {}
+    return {
+        m["dcterms:identifier"]: m["dcterms:title"]
+        for m in members
+        if isinstance(m, dict) and m.get("dcterms:identifier") and m.get("dcterms:title")
+    }
+
+
+def _item_state_uri(item: dict) -> str:
+    state = item.get("rtc_cm:state")
+    uri = state.get("rdf:resource") if isinstance(state, dict) else None
+    if not uri:
+        raise ValueError("The work item has no rtc_cm:state; cannot resolve its workflow.")
+    return uri
+
+
+async def transition_workitem(item_uri: str, action: str) -> dict:
+    """Run a workflow action on a work item via PUT ?_action=<id> and verify the new state.
+
+    Resolves `action` against the actions of the item's workflow, executes it with If-Match,
+    re-reads the item and fails if the state did not change. Never writes rtc_cm:state.
+    Returns {"from", "to", "action"} (state titles when available, else the last URI segment).
+    """
+    client = await get_client()
+    json_headers = {"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    get_resp = await client.get(item_uri, headers=json_headers)
+    get_resp.raise_for_status()
+    etag = get_resp.headers.get("ETag", "")
+    if not etag:
+        raise ValueError(f"Server did not return an ETag for work item '{item_uri}'. Cannot safely transition.")
+    item = get_resp.json()
+    before_uri = _item_state_uri(item)
+    m = _STATE_URI_RE.search(before_uri)
+    if m is None:
+        raise ValueError(f"Unrecognized workflow state URI '{before_uri}'; cannot resolve its workflow.")
+    area, workflow = m.group(1), m.group(2)
+    title = item.get("dcterms:title")
+    if not title:
+        raise ValueError("The work item has no dcterms:title; cannot execute the transition.")
+
+    workflows = f"{settings.elm_url}/ccm/oslc/workflows/{area}"
+    actions_resp = await client.get(f"{workflows}/actions/{workflow}", headers=json_headers)
+    actions_resp.raise_for_status()
+    action_id = _resolve_workflow_action(action, _action_ids(actions_resp.json()))
+
+    resp = await client.put(
+        item_uri,
+        params={"_action": action_id, "oslc.properties": "dcterms:title"},
+        json={"dcterms:title": title},
+        headers={**json_headers, "Content-Type": "application/json", "If-Match": etag},
+    )
+    _check_put(resp)
+
+    after = await _get_json(client, item_uri)
+    after_uri = _item_state_uri(after)
+    if after_uri == before_uri:
+        raise ValueError(
+            f"Action '{action_id}' does not apply to the current state of work item "
+            f"(state unchanged: {_last_segment(before_uri)})."
+        )
+    titles = await _state_titles(client, f"{workflows}/states/{workflow}")
+    state_from, state_to = _last_segment(before_uri), _last_segment(after_uri)
+    return {"from": titles.get(state_from, state_from), "to": titles.get(state_to, state_to), "action": action_id}
 
 
 # =====================================================================
@@ -684,6 +873,59 @@ async def _get_xml_text(url: str) -> str:
     return resp.text
 
 
+async def _fetch_service_xml(project_url: str) -> str:
+    """GET the service provider XML. A services.xml URL is the document itself; otherwise try /services first."""
+    if project_url.endswith("services.xml"):
+        candidates = [project_url, project_url.replace("/services.xml", "/services")]
+    else:
+        candidates = [project_url.rstrip("/") + "/services", project_url]
+    for url in candidates:
+        try:
+            return await _get_xml_text(url)
+        except httpx.HTTPError as exc:
+            logger.debug("OSLC discovery: skipping %s (%s)", url, exc)
+    raise ValueError(f"Could not read the service provider document for '{project_url}'")
+
+
+_FACTORY_TITLE_RE = _re.compile(r"^Location for creation of (.+?) change requests$")
+
+
+async def _list_ccm_creation_factories(project_url: str) -> list[dict]:
+    """List the typed CCM creation factories of a project area (one per work item type).
+
+    Only factories whose oslc:resourceType is EXACTLY cm#ChangeRequest and whose
+    oslc:creation has a type segment after /workitems/ are listed; the generic
+    /workitems factories (incl. drafts) are skipped.
+    Returns [{"title","id","factory_title","factory_uri","shape_uri","resource_type"}].
+    """
+    xml_text = await _fetch_service_xml(project_url)
+    resource_type = QUERY_RESOURCE_TYPE["ccm"]
+    factories: list[dict] = []
+    for block in _re.findall(r"<\w*:?CreationFactory\b.*?</\w*:?CreationFactory>", xml_text, _re.DOTALL):
+        rt = _re.search(r"<\w*:?resourceType\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
+        creation = _re.search(r"<\w*:?creation\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
+        if rt is None or rt.group(1) != resource_type or creation is None:
+            continue
+        type_m = _re.search(r"/workitems/([^/?#]+)/?$", creation.group(1))
+        if type_m is None:
+            continue
+        shape = _re.search(r"<\w*:?resourceShape\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
+        title_m = _re.search(r"<\w*:?title[^>]*>([^<]*)</\w*:?title>", block)
+        raw_title = _html.unescape(title_m.group(1)) if title_m else ""
+        named = _FACTORY_TITLE_RE.match(raw_title.strip())
+        factories.append(
+            {
+                "title": named.group(1) if named else raw_title.strip(),
+                "id": type_m.group(1),
+                "factory_title": raw_title,
+                "factory_uri": creation.group(1),
+                "shape_uri": shape.group(1) if shape else None,
+                "resource_type": resource_type,
+            }
+        )
+    return factories
+
+
 async def list_resource_shapes(domain: str, project: str) -> list[dict]:
     """List the resource types (shapes) of a project area.
 
@@ -691,8 +933,13 @@ async def list_resource_shapes(domain: str, project: str) -> list[dict]:
     type (rm#Requirement / cm#ChangeRequest / qm#TestCase — never a substring,
     mistake note ed14f77c), extract its oslc:resourceShape URIs and GET each one
     to read its title. Returns [{"title", "shape_uri", "resource_type"}].
+
+    CCM is different: it returns one item per typed creation factory (no shape GET), see
+    _list_ccm_creation_factories.
     """
     project_url = await _resolve_project_url(domain, project)
+    if domain == "ccm":
+        return await _list_ccm_creation_factories(project_url)
     xml_text = await _get_xml_text(project_url)
     resource_type = QUERY_RESOURCE_TYPE[domain]
 
@@ -720,32 +967,67 @@ def _occurs_required(occurs: str | None) -> bool:
     return ("Exactly-one" in occurs) or ("One-or-many" in occurs)
 
 
+_CORE_NS = "http://open-services.net/ns/core#"
+_RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _is_shape_property(el: ET.Element) -> bool:
+    """oslc:Property element (RM/QM) or rdf:Description typed core#Property (CCM)."""
+    if el.tag == f"{{{_CORE_NS}}}Property":
+        return True
+    if el.tag != f"{{{_RDF_NS}}}Description":
+        return False
+    return any(c.tag == f"{{{_RDF_NS}}}type" and c.get(f"{{{_RDF_NS}}}resource") == f"{_CORE_NS}Property" for c in el)
+
+
+def _shape_property(el: ET.Element) -> dict:
+    """Extract one property from its element, whatever the order of the children."""
+    text: dict[str, str] = {}
+    res: dict[str, str] = {}
+    for child in el:
+        key = _local(child.tag)
+        value = child.get(f"{{{_RDF_NS}}}resource")
+        if value is not None:
+            res.setdefault(key, value)
+        else:
+            text.setdefault(key, "".join(child.itertext()).strip())
+    occurs = res.get("occurs")
+    return {
+        "name": text.get("name") or None,
+        "title": text.get("title") or None,
+        "required": _occurs_required(occurs),
+        "occurs": _last_segment(occurs) if occurs else None,
+        "read_only": text.get("readOnly", "").lower() == "true",
+        "property_uri": res.get("propertyDefinition"),
+        "range_uri": res.get("range"),
+        "allowed_values_uri": res.get("allowedValues"),
+        "default_value": res.get("defaultValue"),
+    }
+
+
 async def list_shape_properties(shape_uri: str) -> list[dict]:
     """GET a resourceShape and extract its properties.
 
-    For each oslc:Property block: name, title, required (from oslc:occurs),
-    property_uri (propertyDefinition), range_uri, allowed_values_uri.
-    Returns [{"name","title","required","property_uri","range_uri","allowed_values_uri"}].
+    Two formats: <oslc:Property> blocks (RM/QM) and <rdf:Description> typed core#Property
+    (CCM; the ResourceShape's own Description is not a property). Each entry: name, title,
+    required (from oslc:occurs), occurs (last segment), read_only, property_uri
+    (propertyDefinition), range_uri, allowed_values_uri, default_value.
+    Raises ValueError when the shape references properties (oslc:property) but none could be extracted.
     """
     xml_text = await _get_xml_text(shape_uri)
-    props: list[dict] = []
-    for block in _re.findall(r"<\w*:?Property\b.*?</\w*:?Property>", xml_text, _re.DOTALL):
-        name_m = _re.search(r"<\w*:?name[^>]*>([^<]+)</\w*:?name>", block)
-        title_m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", block)
-        occurs_m = _re.search(r"<\w*:?occurs\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        propdef_m = _re.search(r"<\w*:?propertyDefinition\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        range_m = _re.search(r"<\w*:?range\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        allowed_m = _re.search(r"<\w*:?allowedValues\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        props.append(
-            {
-                "name": name_m.group(1).strip() if name_m else None,
-                "title": title_m.group(1).strip() if title_m else None,
-                "required": _occurs_required(occurs_m.group(1) if occurs_m else None),
-                "property_uri": propdef_m.group(1) if propdef_m else None,
-                "range_uri": range_m.group(1) if range_m else None,
-                "allowed_values_uri": allowed_m.group(1) if allowed_m else None,
-            }
-        )
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise ValueError(f"Shape '{shape_uri}' is not valid XML: {exc}") from exc
+    props = [_shape_property(el) for el in root.iter() if _is_shape_property(el)]
+    if not props:
+        refs = sum(1 for el in root.iter(f"{{{_CORE_NS}}}property") if el.get(f"{{{_RDF_NS}}}resource"))
+        if refs:
+            raise ValueError(f"Shape '{shape_uri}' lists {refs} properties but none could be extracted")
     return props
 
 
@@ -757,40 +1039,41 @@ async def list_allowed_values(allowed_values_uri: str) -> list[dict]:
     Returns [{"value_uri", "title"}] (title None when absent).
     """
     xml_text = await _get_xml_text(allowed_values_uri)
-    values: list[dict] = []
-    # Format 2 first: rdf:Description blocks carry a title.
+    titles: dict[str, str | None] = {}
+    # rdf:Description blocks with rdf:about carry a title.
     for block in _re.findall(r"<\w*:?Description\b[^>]*>.*?</\w*:?Description>", xml_text, _re.DOTALL):
         about_m = _re.search(r"rdf:about=\"([^\"]+)\"", block)
         title_m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", block)
         if about_m:
-            values.append(
-                {
-                    "value_uri": about_m.group(1),
-                    "title": title_m.group(1).strip() if title_m else None,
-                }
-            )
-    if values:
-        return values
-    # Format 1: oslc:allowedValue rdf:resource (URIs only).
-    for uri in _re.findall(r"<\w*:?allowedValue\s+[^>]*rdf:resource=\"([^\"]+)\"", xml_text):
-        values.append({"value_uri": uri, "title": None})
-    return values
+            titles[about_m.group(1)] = title_m.group(1).strip() if title_m else None
+    # oslc:allowedValue rdf:resource lists the values (the real CCM container is itself a Description,
+    # whose rdf:about is NOT a value).
+    refs = _re.findall(r"<\w*:?allowedValue\s+[^>]*rdf:resource=\"([^\"]+)\"", xml_text)
+    if refs:
+        return [{"value_uri": uri, "title": titles.get(uri)} for uri in refs]
+    return [{"value_uri": uri, "title": title} for uri, title in titles.items()]
 
 
 async def list_fields(domain: str, project: str, type: str) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
     Resolves the shape by its title (case-insensitive equality) among the shapes
-    of the project; an unknown title raises ValueError (ToolError at the boundary).
+    of the project; for ccm the type is the id, title or alias (task/story) of a typed
+    factory. An unknown type raises ValueError (ToolError at the boundary).
     Returns {"type","shape_uri","required":[...],"optional":[...]}; each field
     carries allowed_values (empty list when the field is not enumerated).
     """
     shapes = await list_resource_shapes(domain, project)
-    matched = next((s for s in shapes if (s["title"] or "").lower() == type.lower()), None)
-    if matched is None:
-        available = [s["title"] for s in shapes]
-        raise ValueError(f"Type '{type}' not found. Available: {available}")
+    if domain == "ccm":
+        matched = _resolve_ccm_type(shapes, type)
+    else:
+        matched = next((s for s in shapes if (s["title"] or "").lower() == type.lower()), None)
+        if matched is None:
+            available = [s["title"] for s in shapes]
+            raise ValueError(f"Type '{type}' not found. Available: {available}")
     shape_uri = matched["shape_uri"]
+    if not shape_uri:
+        raise ValueError(f"Type '{type}' has no resource shape")
     props = await list_shape_properties(shape_uri)
 
     required: list[dict] = []
@@ -802,6 +1085,8 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
         field = {
             "name": p["name"],
             "title": p["title"],
+            "occurs": p["occurs"],
+            "read_only": p["read_only"],
             "property_uri": p["property_uri"],
             "range_uri": p["range_uri"],
             "allowed_values": allowed_values,
