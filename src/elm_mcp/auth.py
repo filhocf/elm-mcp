@@ -41,6 +41,16 @@ async def _authenticate(client: httpx.AsyncClient) -> None:
             f"[credencial] ELM authentication failed for user '{settings.elm_user}': invalid user or password. "
             "Check ELM_USER and ELM_PASSWORD."
         )
+    if resp.status_code == 403:
+        raise RuntimeError(
+            f"[credencial] ELM login refused (HTTP 403) for user '{settings.elm_user}': account locked or "
+            "without permission to sign in. Check ELM_USER and ELM_PASSWORD."
+        )
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"[http-{resp.status_code}] ELM login failed with HTTP {resp.status_code}: the server is "
+            "unavailable or misconfigured. Retry later."
+        )
 
 
 async def close_client() -> None:

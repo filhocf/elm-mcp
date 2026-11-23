@@ -129,6 +129,10 @@ async def _request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -
     send = getattr(client, method.lower())
     resp = await send(url, **kwargs)
     if _needs_reauth(resp):
+        # A 403 without oslc:message is treated as an expired session/CSRF and the request is resent
+        # once, writes included (decision: 403 refuses the write, covered by the F1 tests). Residual risk:
+        # if that 403 was a real refusal the write is sent twice; it is bounded to one resend and the
+        # second answer is the one reported.
         await _authenticate(client)
         resp = await send(url, **kwargs)
     return resp
@@ -812,7 +816,9 @@ async def create_requirement(
     discovers the factory, sanitizes nothing here (the caller passes already-sanitized
     XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
     Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
-    Returns {"uri": ..., "identifier": ...}, the identifier re-read from the server (D8).
+    Returns {"uri": ..., "identifier": ...}, the identifier re-read from the server (D8). If the re-read
+    fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier (or
+    None) and a short ``warning`` key, and logs a warning.
     Raises ValueError if the project does not exist or the type is missing/unknown.
     """
     project_url = await _resolve_project_url("rm", project)
@@ -833,8 +839,11 @@ async def create_requirement(
         _raise_write_error(resp, "create_requirement", factory_url)
     location = resp.headers.get("Location", "")
     identifier = _extract_identifier(resp.text)
+    result: dict = {"uri": location, "identifier": identifier}
     if location:
         # The POST body can be empty: read the identifier back from the created artifact (D8).
+        # The requirement ALREADY exists here, so a failed re-read must never propagate (the caller
+        # would retry the POST and create a duplicate): fall back to the POST body and warn.
         try:
             reread = await fetch(
                 client,
@@ -843,10 +852,13 @@ async def create_requirement(
                 "create_requirement",
                 headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
             )
-            identifier = _extract_identifier(reread.text) or identifier
-        except ValueError as exc:
-            logger.debug("create_requirement: re-read of %s failed (%s)", location, exc)
-    return {"uri": location, "identifier": identifier}
+            result["identifier"] = _extract_identifier(reread.text) or identifier
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            logger.warning("create_requirement: created %s but the re-read failed (%s)", location, exc)
+            result["warning"] = (
+                "Requirement created, but re-reading it failed; the identifier may be missing. Do NOT create it again."
+            )
+    return result
 
 
 async def _resolve_requirement_shape(project: str, type_arg: str | None) -> str:
@@ -872,8 +884,10 @@ async def _resolve_requirement_shape(project: str, type_arg: str | None) -> str:
 async def delete_requirement(uri: str) -> dict:
     """DELETE an RM requirement (direct mode) and confirm by re-reading it (404 or 410).
 
-    Raises ValueError when the DELETE is refused (gate named) or when the artifact is still
-    readable afterwards. Returns {"uri", "deleted": True}.
+    The DELETE is unconditional (no If-Match): it removes whatever version exists. Raises ValueError
+    when the DELETE is refused (gate named), when the artifact is still readable afterwards, or when
+    the confirmation GET is denied (401/403: the DELETE was sent, the deletion is NOT confirmed).
+    Returns {"uri", "deleted": True}.
     """
     client = await get_client()
     resp = await _request(client, "DELETE", uri, headers={"OSLC-Core-Version": "2.0"})
@@ -884,6 +898,11 @@ async def delete_requirement(uri: str) -> dict:
         return {"uri": uri, "deleted": True}
     if check.is_success:
         raise ValueError(f"DELETE was accepted but the requirement is still readable: {uri}")
+    if check.status_code in (401, 403):
+        raise ValueError(
+            f"Deletion not confirmed: the DELETE was sent but the confirmation read of {uri} was denied "
+            f"(HTTP {check.status_code}). Check whether the requirement still exists."
+        )
     check_response(check, "delete_requirement", uri)
     raise ValueError(f"Could not confirm the deletion of {uri}")
 
@@ -1300,14 +1319,17 @@ async def list_folders(project: str) -> list[dict]:
     <project area> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
     (The component URI is rejected by the server with a 400: D3.)
     System folders (root, Folder Query Results) are filtered (tenant-neutral).
-    Degrades to [] when the service provider announces no project area.
+    Raises ValueError when the service provider announces no project area (no oslc:details).
     Returns [{"title","uri"}].
     """
     project_url = await _resolve_project_url("rm", project)
     sp_xml = await _get_xml_text(project_url)
     area_m = _re.search(r"<\w*:?details\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
     if area_m is None:
-        return []
+        raise ValueError(
+            f"project area not advertised by the service provider ({project_url}): "
+            "the folders cannot be queried (no oslc:details)."
+        )
     project_area_uri = area_m.group(1)
 
     client = await get_client()

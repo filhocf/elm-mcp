@@ -567,11 +567,11 @@ async def test_list_folders_filters_system_folders():
 
 
 @respx.mock
-async def test_list_folders_no_component_returns_empty():
-    """17. SP without a project area (oslc:details) -> [] (A4, degrades)."""
+async def test_list_folders_no_project_area_raises_toolerror():
+    """17. SP without a project area (oslc:details) -> clear error, not [] (G5 loop 2, was A4 'degrades')."""
     _mock_rm_discovery(services_xml=RM_SP_NO_COMPONENT_XML)
-    result = await list_folders("PROJ")
-    assert result == []
+    with pytest.raises(ToolError, match="project area not advertised"):
+        await list_folders("PROJ")
 
 
 @respx.mock

@@ -22,17 +22,20 @@
         {
           "name": "type",
           "type": "string",
-          "required": false
+          "required": false,
+          "default": "task"
         },
         {
           "name": "description",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "owner",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -58,12 +61,14 @@
         {
           "name": "folder",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "type",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -84,32 +89,38 @@
         {
           "name": "type",
           "type": "string",
-          "required": false
+          "required": false,
+          "default": "task"
         },
         {
           "name": "description",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "parent_id",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "owner",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "filed_against",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "custom_fields",
           "type": "null|object",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -136,12 +147,14 @@
         {
           "name": "plan",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "item_ids",
           "type": "array[string]|null",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -260,7 +273,8 @@
         {
           "name": "query",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -276,7 +290,8 @@
         {
           "name": "query",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -292,7 +307,8 @@
         {
           "name": "query",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -324,12 +340,14 @@
         {
           "name": "title",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "content",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -345,32 +363,38 @@
         {
           "name": "title",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "description",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "owner",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "estimate_hours",
           "type": "null|number",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "planned_for",
           "type": "null|string",
-          "required": false
+          "required": false,
+          "default": null
         },
         {
           "name": "custom_fields",
           "type": "null|object",
-          "required": false
+          "required": false,
+          "default": null
         }
       ]
     }

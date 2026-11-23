@@ -40,7 +40,11 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
 
 - **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
 - Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
-- Reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached.
+- The main reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached. A login answering 403 or 5xx now fails (`[credencial]` / `[http-<status>]`) instead of being accepted; three direct reads still do not re-authenticate (see `docs/roadmap.md`, "Dívida conhecida").
+- `list_folders` now raises "project area not advertised by the service provider" instead of returning `[]` when `oslc:details` is missing.
+- `create_requirement`: if the re-read of D8 fails after the POST, it no longer raises (the requirement exists): it returns the URI, the POST-body identifier (or `null`) and a `warning`, and logs a warning.
+- `delete_requirement`: a denied (401/403) confirmation read reports "deletion not confirmed" (the DELETE was sent); the DELETE is unconditional (no `If-Match`).
+- The contract snapshot grew: each parameter now records its `default` when it declares one; `scripts/update_contract.py` accepts an output path.
 - `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
   `reopen` work only where the workflow's action ids contain those words.
 

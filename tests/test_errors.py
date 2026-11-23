@@ -21,7 +21,12 @@ async def test_catalog_url_timeout():
 
 @pytest.mark.asyncio
 async def test_catalog_url_401():
-    with patch("elm_mcp.oslc.get_client", new_callable=AsyncMock) as mock_client:
+    # _authenticate is patched: the re-login of the 401 is not what this test is about
+    # (with the AsyncMock client its response would be a mock, not an HTTP status).
+    with (
+        patch("elm_mcp.oslc.get_client", new_callable=AsyncMock) as mock_client,
+        patch("elm_mcp.oslc._authenticate", new_callable=AsyncMock),
+    ):
         client = AsyncMock()
         resp = httpx.Response(401, request=httpx.Request("GET", "http://test"))
         client.get.return_value = resp

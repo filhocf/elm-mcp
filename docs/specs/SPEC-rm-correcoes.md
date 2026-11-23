@@ -30,8 +30,12 @@ própria. Logo, o modo é escolha de configuração, não detecção automática
 - QUANDO `delete_requirement` for chamado, o sistema DEVE excluir e confirmar por releitura (410 ou 404).
 
 ## A confirmar
+- `oslc:details` como fonte da project area (D3) ainda precisa de aceitação viva num servidor real; sem ele, `list_folders` agora falha com "project area not advertised by the service provider" (antes devolvia `[]`).
 - Fábrica e corpo de changeset e o método de entrega na 7.0.1 (o cliente de origem usa PATCH com `acceptedBy`; não verificado aqui por falta de permissão).
 - Comportamento num projeto que exige changeset (esperar acesso ao segundo projeto de referência).
+
+## Nota — D7 (`type`)
+`type` é obrigatório em runtime e opcional no schema por decisão deliberada da v0.6.0 (compatibilidade do cliente MCP: o schema opcional deixa a recusa listar os tipos válidos). Torná-lo obrigatório no schema fica como mudança incompatível futura.
 
 ## Gates
 G3 (respx) → G4 → G5 → aceitação viva: criar, atualizar e excluir requisito no modo `direct`; modo `changeset` só quando houver projeto e permissão para testar.

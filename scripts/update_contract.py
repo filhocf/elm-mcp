@@ -2,18 +2,19 @@
 
 Usage (from the repository root):
 
-    uv run python scripts/update_contract.py
+    uv run python scripts/update_contract.py [output-path]
 
 Run it only when a change to the tools is intentional (name, parameters, read-only flag),
 then record the change in CHANGELOG.md. Needs no network and no credentials.
 
-Format: {"tools": [{"name", "read_only", "parameters": [{"name", "type", "required"}]}]},
-tools sorted by name, parameters in declaration order. The format is the one compared by
+Format: {"tools": [{"name", "read_only", "parameters": [{"name", "type", "required", "default"?}]}]},
+``default`` appears only when the parameter declares one. Tools sorted by name, parameters in declaration order. The format is the one compared by
 tests/test_w1_contract.py.
 """
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 from elm_mcp.server import mcp
@@ -31,6 +32,14 @@ def _param_type(schema: dict) -> str:
     return kind
 
 
+def _param(name: str, prop: dict, required: bool) -> dict:
+    """Contract entry of one parameter; the declared default (even null) is part of the contract."""
+    entry = {"name": name, "type": _param_type(prop), "required": required}
+    if "default" in prop:
+        entry["default"] = prop["default"]
+    return entry
+
+
 async def build_contract() -> dict:
     """Contract of the tools really registered on the server."""
     tools = []
@@ -42,19 +51,20 @@ async def build_contract() -> dict:
                 "name": tool.name,
                 "read_only": bool(tool.annotations and tool.annotations.read_only_hint),
                 "parameters": [
-                    {"name": name, "type": _param_type(prop), "required": name in required}
-                    for name, prop in schema.get("properties", {}).items()
+                    _param(name, prop, name in required) for name, prop in schema.get("properties", {}).items()
                 ],
             }
         )
     return {"tools": tools}
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = sys.argv[1:] if argv is None else argv
+    target = Path(args[0]) if args else SNAPSHOT
     contract = asyncio.run(build_contract())
-    SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
-    SNAPSHOT.write_text(json.dumps(contract, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"wrote {SNAPSHOT} ({len(contract['tools'])} tools)")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(contract, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wrote {target} ({len(contract['tools'])} tools)")
 
 
 if __name__ == "__main__":
