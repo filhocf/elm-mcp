@@ -433,6 +433,23 @@ async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
 
 
 @tool
+async def set_field(id: str, field: str, value: str) -> dict:
+    """Set one field of a work item via a partial PUT (If-Match).
+
+    Args:
+        id: Work item ID (number)
+        field: Prefixed property (e.g. "rtc_cm:storyPoints", "dcterms:title") or the shape's
+            property name (e.g. "storyPoints", see list_fields)
+        value: The value. For an enumerated field: the literal title (e.g. "5 pts") or literal id;
+            a value outside allowedValues is refused listing the valid ones.
+
+    Returns {"id", "field", "value", "warnings"}; warnings say when "Unassigned" was written to a
+    required attribute (the server treats it as empty).
+    """
+    return await oslc.set_field(id, field, value)
+
+
+@tool
 async def create_requirement(
     project: str,
     title: str,

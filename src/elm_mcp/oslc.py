@@ -1757,3 +1757,78 @@ async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
     return await _change_link(source, target, link_type, add=False)
 
 
+# ---------------------------------------------------------------------------------------------
+# set_field
+# ---------------------------------------------------------------------------------------------
+def _expand(name: str, prefixes: dict) -> str | None:
+    prefix, sep, local = name.partition(":")
+    ns = prefixes.get(prefix) if sep else None
+    return f"{ns}{local}" if ns else None
+
+
+def _compact(uri: str, prefixes: dict) -> str | None:
+    best = max(((p, ns) for p, ns in prefixes.items() if uri.startswith(ns)), key=lambda x: len(x[1]), default=None)
+    return f"{best[0]}:{uri[len(best[1]) :]}" if best else None
+
+
+def _match_literal(value: str, allowed: list[dict]) -> dict | None:
+    wanted = value.strip()
+    for a in allowed:
+        if a["value_uri"] == wanted or _last_segment(a["value_uri"]) == wanted:
+            return a
+    lowered = wanted.lower()
+    return next((a for a in allowed if (a["title"] or "").strip().lower() == lowered), None)
+
+
+async def set_field(id: str, field: str, value: str) -> dict:
+    """Write one field with a partial PUT; an enumerated field takes the literal title or id.
+
+    ``field`` is the item's prefixed property name (rtc_cm:storyPoints) or the shape's property
+    name (storyPoints). The value of an enumerated property is validated against its allowedValues
+    (shape of the allowedValues document: to be confirmed in live acceptance).
+    """
+    field = (field or "").strip()
+    if not field:
+        raise ValueError("Field must not be empty.")
+    client = await get_client()
+    uri = workitem_uri(id)
+    item, etag = await _read_item(client, uri, "set_field")
+    prefixes = {**NS, "rtc_cm": "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/"}
+    if isinstance(item.get("prefixes"), dict):
+        prefixes.update(item["prefixes"])
+
+    props: list[dict] = []
+    shape = _resource_uri(item.get("oslc:instanceShape"))
+    if shape:
+        props = await list_shape_properties(shape)
+    expanded = _expand(field, prefixes)
+    prop = next((p for p in props if expanded and p["property_uri"] == expanded), None)
+    if prop is None:
+        prop = next((p for p in props if p["name"] == field), None)
+    key = field
+    if prop is not None and ":" not in field:
+        key = _compact(prop["property_uri"] or "", prefixes) or ""
+        if not key:
+            raise ValueError(f"Cannot map shape property '{field}' ({prop['property_uri']}) to a prefixed name.")
+    elif prop is None and ":" not in field:
+        names = sorted(p["name"] for p in props if p["name"])
+        raise ValueError(f"Field '{field}' not found in the work item's shape. Available: {names}")
+
+    warnings: list[str] = []
+    written: object = value
+    if prop is not None and prop["allowed_values_uri"]:
+        allowed = await list_allowed_values(prop["allowed_values_uri"])
+        literal = _match_literal(value, allowed)
+        if literal is None:
+            titles = [a["title"] or _last_segment(a["value_uri"]) for a in allowed]
+            raise ValueError(f"Value '{value}' is not allowed for {key}. Valid values: {titles}")
+        written = {"rdf:resource": literal["value_uri"]}
+        if prop["required"] and _UNASSIGNED_RE.match(literal["title"] or ""):
+            warnings.append(
+                f"'{literal['title']}' (Unassigned) was written to the required attribute {key}: the server "
+                "treats this literal as empty, so the attribute still counts as not filled."
+            )
+    await _put_partial(client, uri, etag, item, {key: written}, "set_field")
+    return {"id": id, "field": key, "value": written, "warnings": warnings}
+
+
