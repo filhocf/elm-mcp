@@ -83,14 +83,15 @@ ELM server". Redirects are checked before being followed, so a 302 to another ho
 ## Tools
 
 **Read:** `list_projects` · `search_requirements` · `get_requirement` · `list_workitems` ·
-`get_workitem` · `search_testcases` · `list_iterations` · `get_plan_items`
+`get_workitem` · `search_testcases` · `list_iterations` · `get_plan_items` ·
+`list_qm_resources` · `get_qm_resource` · `get_test_coverage` · `get_test_results`
 
 **Discovery:** `list_types` · `list_fields` · `inspect_workitem` · `list_folders`
 
 **Write (RM requirements):** `create_requirement` · `update_requirement` · `delete_requirement`
 
 **Write (CCM work items):** `create_workitem` · `update_workitem` · `add_child_workitem` ·
-`transition_workitem`
+`transition_workitem` · `link_artifacts` · `unlink_artifacts`
 
 Full reference with signatures: [docs/TOOLS.md](docs/TOOLS.md). Query syntax and examples:
 [docs/USAGE.md](docs/USAGE.md).

@@ -1,6 +1,6 @@
 # SPEC — QM (ETM): leitura correta e completa
 
-**Status:** G0 feito (leitura viva 23/nov) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F6 · **Antecede:** `SPEC-qm-write`
+**Status:** DONE parcial (G4 GREEN; propriedades de TestResult e `rdf:type` de Keyword/BuildRecord/TestEnvironment a confirmar na aceitação viva) · G0 feito (leitura viva 23/nov) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F6 · **Antecede:** `SPEC-qm-write`
 
 ## Contexto (verificado no servidor de referência, ETM 7.0.1 SR1)
 - O ETM responde só RDF/XML (JSON dá 406).

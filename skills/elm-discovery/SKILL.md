@@ -112,4 +112,4 @@ inspect_workitem(id="100200")
 - **`inspect_workitem` is CCM-only** and is the fastest way to discover custom `rtc_ext:*`
   attribute URIs that no catalog lists plainly.
 - **`list_folders` is RM-only.** It filters out system folders (root, query results).
-- QM (ETM) is read-only today — discovery there supports `search_testcases`, not writes.
+- QM (ETM) is read-only today — use `search_testcases` (one item per test case) and `list_qm_resources`; no writes.
