@@ -5,6 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+Live acceptance of W2 (read-only, ELM 7.0.1):
+
+- `list_workitems` filters now use what the server accepts in `oslc.where`: `type` is resolved (id, alias or
+  title) by the project's discovery and sent as `rtc_cm:type="<id>"` (`dcterms:type="<title>"` matched nothing);
+  `state` is sent as `rtc_cm:state="<state id>"` (a title is resolved by the workflow of the given `type`,
+  otherwise the call fails asking for the id; `oslc_cm:status` was an HTTP 400); `owner` is always a user URI.
+- `list_workflow` no longer fails with "does not expose its workflow": it reads the allowedValues document of the
+  shape's `state` property (`.../property/internalState/allowedValues`) and derives the workflow from the state
+  URIs; if the titles document cannot be read, it still returns the state ids.
+
 ### Added
 
 CCM collaboration (SPEC-ccm-colaboracao, wave W2):

@@ -5,7 +5,7 @@ import io
 import logging
 import math
 import re as _re
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -1637,7 +1637,7 @@ _COMMENT_CONTENT_TYPE = "application/x-oslc-cm-change-request+json"
 # Title of the "not assigned" literal of an enumeration. To be confirmed in live acceptance
 # (only the English title was seen in the RED fixtures).
 _UNASSIGNED_RE = _re.compile(r"^\s*(unassigned|n[aã]o\s+(atribu[ií]do|designado))\s*$", _re.IGNORECASE)
-_WORKFLOW_STATES_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/?#]+)/?$")
+_WORKFLOW_STATE_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/]+)/([^/?#]+)/?$")
 _WORKITEM_ID_RE = _re.compile(r"/(?:com\.ibm\.team\.workitem\.WorkItem|oslc/workitems)/([^/?#]+)/?$")
 
 
@@ -2017,44 +2017,51 @@ def _is_state_property(p: dict) -> bool:
     return p["property_uri"] == "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/state" or p["name"] == "state"
 
 
-async def list_workflow(project: str, type: str) -> dict:
-    """States (id, title, group) and action ids of the workflow of a work item type.
+async def _workflow_of(factory: dict) -> dict:
+    """Workflow of a type (resolved factory): states (id, title, group) and action ids.
 
-    The workflow is read from the allowedValues of the type shape's state property
-    (/oslc/workflows/{pa}/states/{wf}); that this is where the real shape points is to be
-    confirmed in live acceptance.
+    Verified live: the shape's ``state`` property points at ``.../shapes/workitems/{type}/property/
+    internalState/allowedValues``, whose values are the state URIs
+    ``/oslc/workflows/{pa}/states/{wf}/{state}``. Area and workflow come from those URIs; titles and
+    groups from ``.../states/{wf}`` (when that document cannot be read, the state ids are still returned).
     """
-    project_url = await _resolve_project_url("ccm", project)
-    factory = _resolve_ccm_type(await _list_ccm_creation_factories(project_url), type)
     if not factory["shape_uri"]:
         raise ValueError(f"Type '{factory['title']}' has no resource shape: its workflow cannot be resolved.")
     props = await list_shape_properties(factory["shape_uri"])
-    states_url = next(
+    allowed_url = next(
         (p["allowed_values_uri"] for p in props if _is_state_property(p) and p["allowed_values_uri"]), None
     )
-    m = _WORKFLOW_STATES_RE.search(states_url or "")
-    if m is None:
+    state_uris = [v["value_uri"] for v in await list_allowed_values(allowed_url)] if allowed_url else []
+    matches = [m for m in (_WORKFLOW_STATE_RE.search(u) for u in state_uris) if m]
+    if not matches:
         raise ValueError(
-            f"Type '{factory['title']}' does not expose its workflow (no state property pointing at "
-            "/oslc/workflows/.../states/...)."
+            f"Type '{factory['title']}' does not expose its workflow (no state property whose allowed values "
+            "are /oslc/workflows/.../states/... URIs)."
         )
-    area, workflow = m.group(1), m.group(2)
+    area, workflow = matches[0].group(1), matches[0].group(2)
+    state_ids = [unquote(m.group(3)) for m in matches if (m.group(1), m.group(2)) == (area, workflow)]
     client = await get_client()
-    states_resp = await fetch(client, "GET", states_url, "list_workflow", headers=_JSON_HEADERS)
+    states_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/states/{workflow}"
     actions_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/actions/{workflow}"
+    states: list[dict] = []
+    try:
+        states_resp = await fetch(client, "GET", states_url, "list_workflow", headers=_JSON_HEADERS)
+        for s in _page_members(states_resp.json()):
+            if not isinstance(s, dict):
+                continue
+            about = s.get("rdf:about") or ""
+            states.append(
+                {
+                    "id": s.get("dcterms:identifier") or (_last_segment(about) if about else None),
+                    "title": s.get("dcterms:title"),
+                    "group": s.get("rtc_cm:group"),
+                }
+            )
+    except ValueError:
+        states = []
+    if not states:
+        states = [{"id": sid, "title": None, "group": None} for sid in state_ids]
     actions_resp = await fetch(client, "GET", actions_url, "list_workflow", headers=_JSON_HEADERS)
-    states = []
-    for s in _page_members(states_resp.json()):
-        if not isinstance(s, dict):
-            continue
-        about = s.get("rdf:about") or ""
-        states.append(
-            {
-                "id": s.get("dcterms:identifier") or (_last_segment(about) if about else None),
-                "title": s.get("dcterms:title"),
-                "group": s.get("rtc_cm:group"),
-            }
-        )
     return {
         "type": factory["title"],
         "workflow": workflow,
@@ -2063,11 +2070,18 @@ async def list_workflow(project: str, type: str) -> dict:
     }
 
 
+async def list_workflow(project: str, type: str) -> dict:
+    """States (id, title, group) and action ids of the workflow of a work item type."""
+    project_url = await _resolve_project_url("ccm", project)
+    factory = _resolve_ccm_type(await _list_ccm_creation_factories(project_url), type)
+    return await _workflow_of(factory)
+
+
 # ---------------------------------------------------------------------------------------------
-# list_workitems filters (oslc.where). Property names follow the real work item
-# (dcterms:type = type title, oslc_cm:status = state title, dcterms:contributor = user URI,
-# rtc_cm:plannedFor = iteration URI); that the query service accepts each one in oslc.where is
-# to be confirmed in live acceptance.
+# list_workitems filters (oslc.where). Verified live (ELM 7.0.1): rtc_cm:type="<type id>" and
+# rtc_cm:state="<full state id>" filter; dcterms:type="<title>" matches nothing, rtc_cm:state="<title>"
+# matches nothing and oslc_cm:status is an HTTP 400 in oslc.where; dcterms:contributor only as a user URI;
+# rtc_cm:plannedFor=<iteration URI> is the documented form (not verified live).
 # ---------------------------------------------------------------------------------------------
 def _safe_filter_value(name: str, value: str) -> str:
     value = str(value).strip()
@@ -2084,22 +2098,54 @@ def _is_uri(value: str) -> bool:
     return value.startswith(("http://", "https://")) and " " not in value
 
 
-def workitem_filters(
-    type: str | None = None, state: str | None = None, owner: str | None = None, planned_for: str | None = None
+async def _state_filter_id(state: str, factory: dict | None) -> str:
+    """State id for rtc_cm:state: an id (or state URI) passes through; a title needs the workflow of ``type``."""
+    if _is_uri(state):
+        state = unquote(_last_segment(state))
+    if "." in state:
+        return state
+    hint = "Pass the state id instead (use list_workflow to see the ids of the type's states)."
+    if factory is None:
+        raise ValueError(
+            f"State '{state}' looks like a title, and a title can only be resolved together with `type`. {hint}"
+        )
+    states = (await _workflow_of(factory))["states"]
+    matches = [s["id"] for s in states if s["id"] and (s["title"] or "").strip().lower() == state.lower()]
+    if len(set(matches)) == 1:
+        return matches[0]
+    reason = "is ambiguous" if matches else "was not found"
+    raise ValueError(f"State '{state}' {reason} in the workflow of type '{factory['title']}'. {hint}")
+
+
+async def workitem_filters(
+    project: str,
+    type: str | None = None,
+    state: str | None = None,
+    owner: str | None = None,
+    planned_for: str | None = None,
 ) -> list[str]:
     """oslc.where clauses of the list_workitems filters (validated against clause injection)."""
-    clauses: list[str] = []
     if type is not None:
-        clauses.append(f'dcterms:type="{_safe_filter_value("type", type)}"')
+        type = _safe_filter_value("type", type)
     if state is not None:
-        clauses.append(f'oslc_cm:status="{_safe_filter_value("state", state)}"')
+        state = _safe_filter_value("state", state)
     if owner is not None:
         owner = _safe_filter_value("owner", owner)
-        user = owner if _is_uri(owner) else f"{settings.elm_url}/jts/users/{_quote_segment(owner)}"
-        clauses.append(f"dcterms:contributor=<{user}>")
     if planned_for is not None:
         planned_for = _safe_filter_value("planned_for", planned_for)
         if not _is_uri(planned_for):
             raise ValueError(f"planned_for must be an iteration URI (see list_iterations), got {planned_for!r}")
+    clauses: list[str] = []
+    factory = None
+    if type is not None:
+        project_url = await _resolve_project_url("ccm", project)
+        factory = _resolve_ccm_type(await _list_ccm_creation_factories(project_url), type)
+        clauses.append(f'rtc_cm:type="{factory["id"]}"')
+    if state is not None:
+        clauses.append(f'rtc_cm:state="{await _state_filter_id(state, factory)}"')
+    if owner is not None:
+        user = owner if _is_uri(owner) else f"{settings.elm_url}/jts/users/{_quote_segment(owner)}"
+        clauses.append(f"dcterms:contributor=<{user}>")
+    if planned_for is not None:
         clauses.append(f"rtc_cm:plannedFor=<{planned_for}>")
     return clauses

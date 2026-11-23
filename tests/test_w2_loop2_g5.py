@@ -362,10 +362,11 @@ async def test_create_workitem_discovers_the_project_and_factories_once(w2_route
 # 8. LOW: filters, self link, documentation of the raw query
 # ======================================================================
 @pytest.mark.parametrize("value", ["a\nb", "a\tb", "a\x00b", "a\x1bb", "a\u200bb"])
-def test_filters_refuse_non_printable_characters(value):
+async def test_filters_refuse_non_printable_characters(value):
+    """Validation happens before any request (no router: a request would hit the network guard)."""
     for name in ("type", "state", "owner"):
         with pytest.raises(ValueError, match="forbidden"):
-            oslc.workitem_filters(**{name: value})
+            await oslc.workitem_filters("PROJECT", **{name: value})
 
 
 async def test_a_work_item_cannot_be_linked_to_itself(w2_router):

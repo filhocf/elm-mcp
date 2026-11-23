@@ -97,9 +97,12 @@ async def list_workitems(
     """Search work items in an RTC project. Query uses oslc.where syntax.
 
     Optional filters, applied by the server and combined with `query` using "and":
-        type: work item type title (dcterms:type, e.g. "Task")
-        state: state title (oslc_cm:status, e.g. "In Progress")
-        owner: user id (e.g. "jdoe") or user URI (dcterms:contributor)
+        type: work item type id, alias or title (e.g. "task", "Story"); resolved by the project's
+            discovery and sent as rtc_cm:type="<type id>"
+        state: state id (e.g. "com.ibm.team.apt.storyWorkflow.state.s3", see list_workflow) sent as
+            rtc_cm:state; a state title is accepted only together with `type` (resolved by that type's
+            workflow); otherwise pass the id
+        owner: user id (e.g. "jdoe") or user URI, always sent as a URI (dcterms:contributor)
         planned_for: iteration URI (rtc_cm:plannedFor, see list_iterations)
     A filter value with a double quote, angle bracket, backslash or non-printable character is refused.
     The raw `query` is combined with the filters only with `and`: `or` is not supported (oslc.where has
@@ -109,7 +112,7 @@ async def list_workitems(
     Returns {"items": [...], "truncated": bool}; truncated=True means the query has more items.
     """
     clauses = [query] if query else []
-    clauses += oslc.workitem_filters(type=type, state=state, owner=owner, planned_for=planned_for)
+    clauses += await oslc.workitem_filters(project, type=type, state=state, owner=owner, planned_for=planned_for)
     query = " and ".join(clauses) or None
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
     results = await oslc.query_resources("ccm", project, query, select=select, limit=limit)

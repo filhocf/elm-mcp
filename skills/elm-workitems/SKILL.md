@@ -41,8 +41,9 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
 ### Read
 
 1. **Query.** `list_workitems(project, query=None, limit=None, type=None, state=None,
-   owner=None, planned_for=None)` runs an OSLC query. The filters (`type` title, `state`
-   title, `owner` user id or URI, `planned_for` iteration URI) are sent to the server in
+   owner=None, planned_for=None)` runs an OSLC query. The filters (`type` id/alias/title,
+   `state` id from `list_workflow` (a title only together with `type`), `owner` user id or URI,
+   `planned_for` iteration URI) are sent to the server in
    `oslc.where` and combined with `query` only with `and` (no `or`); a value with a quote,
    angle bracket, backslash or non-printable character is refused. It follows the server's
    pages until `limit` items (default 50, max 1000; `limit` must be positive) and returns
