@@ -319,11 +319,11 @@ async def test_download_maps_a_404_on_the_content_to_the_not_found_gate(w2_route
 # ======================================================================
 # Contract: registered, read only (local file, never the ALM), no flag, no internal API
 # ======================================================================
-async def test_the_w5_attachment_tools_are_registered_as_read_only_with_the_agreed_parameters():
+async def test_the_w5_attachment_tools_are_registered_with_the_agreed_parameters():
     tools = {t.name: t for t in await server.mcp.list_tools()}
     listing, download = tools["list_attachments"], tools["download_attachment"]
     assert listing.annotations.read_only_hint is True
-    assert download.annotations.read_only_hint is True  # writes a LOCAL file, never the ALM (documented)
+    assert download.annotations.read_only_hint is False  # writes a LOCAL file (G5 loop 2)
     assert list(listing.input_schema["properties"]) == ["id"]
     props = download.input_schema["properties"]
     assert list(props) == ["id", "attachment", "dest", "overwrite"]
