@@ -732,6 +732,11 @@ def _categories_calls() -> list:
     return [c for c in respx.calls if CATEGORIES_PATH in str(c.request.url)]
 
 
+def _allowed_values_calls(type_id: str) -> list:
+    """GETs on the allowedValues of the type's category property (what the removed default lookup read)."""
+    return [c for c in respx.calls if c.request.method == "GET" and str(c.request.url) == f.allowed_values_url(type_id)]
+
+
 @pytest.mark.parametrize("type_arg", ["task", "story"])
 @respx.mock
 async def test_d13_create_workitem_without_filed_against_omits_the_property(type_arg):
@@ -754,6 +759,8 @@ async def test_d13_create_workitem_without_filed_against_does_not_look_up_a_cate
     _setup_create(type_id)
     await create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
     assert _categories_calls() == []
+    assert _allowed_values_calls(type_id) == []
+    assert "filedAgainst" not in _posted_body()
     assert "_OTHERPA" not in _posted_body()
 
 
@@ -764,6 +771,7 @@ async def test_d13_create_workitem_explicit_filed_against_is_sent_as_is():
     await create_workitem(project=PROJECT, title="T", type="task", filed_against=f.CAT_2, if_exists="create")
     assert _filed_against_uris(_posted_body()) == [f.CAT_2]
     assert _categories_calls() == []
+    assert _allowed_values_calls("task") == []
 
 
 @respx.mock
