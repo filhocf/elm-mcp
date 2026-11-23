@@ -284,7 +284,7 @@ async def test_get_hours_one_failed_entry_goes_to_errors_and_the_rest_is_summed(
     assert result["total_hours"] == 30.0  # 36 h minus the unreadable 6 h entry
     assert _hours_of(_people(result), "jdoe") == 14.0
     assert _hours_of(_people(result), "asmith") == 16.0
-    assert result["partial"] is False
+    assert result["partial"] is True
 
 
 async def test_get_hours_reauthenticates_once_and_counts_the_entry_after_an_expired_session(w2_router):
