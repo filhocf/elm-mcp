@@ -16,7 +16,8 @@ src/elm_mcp/
 ├── hours.py          # Time sheet reading: list_time, get_hours (ms -> h, 8 concurrent reads)
 ├── attachments.py    # Attachment metadata and local download (Accept */*, size cap, base name only)
 ├── qm.py             # ETM (QM) reading: capability by resourceType, RDF/XML pages, coverage, results
-└── server.py         # MCP server with 35 tools (21 read-only, 14 write)
+├── qm_write.py       # ETM (QM) writing: create by title, update/link by byte edits of the re-read RDF/XML, delete
+└── server.py         # MCP server with 40 tools (21 read-only, 19 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking
