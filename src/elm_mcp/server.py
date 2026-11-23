@@ -68,9 +68,14 @@ async def list_projects(domain: str) -> list[dict]:
 
 
 @read_tool
-async def search_requirements(project: str, query: str | None = None) -> list[dict]:
-    """Search requirements in a DOORS Next project. Query uses oslc.where syntax."""
-    return await oslc.query_resources("rm", project, query)
+async def search_requirements(project: str, query: str | None = None) -> dict:
+    """Search requirements in a DOORS Next project. Query uses oslc.where syntax.
+
+    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
+    truncated=True means the query has more items than were returned.
+    """
+    results = await oslc.query_resources("rm", project, query, limit=oslc.MAX_QUERY_LIMIT)
+    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool
@@ -80,10 +85,37 @@ async def get_requirement(uri: str) -> dict:
 
 
 @read_tool
-async def list_workitems(project: str, query: str | None = None) -> list[dict]:
-    """Search work items in an RTC project. Query uses oslc.where syntax."""
+async def list_workitems(
+    project: str,
+    query: str | None = None,
+    limit: int | None = None,
+    type: str | None = None,
+    state: str | None = None,
+    owner: str | None = None,
+    planned_for: str | None = None,
+) -> dict:
+    """Search work items in an RTC project. Query uses oslc.where syntax.
+
+    Optional filters, applied by the server and combined with `query` using "and":
+        type: work item type id, alias or title (e.g. "task", "Story"); resolved by the project's
+            discovery and sent as rtc_cm:type="<type id>"
+        state: state id (e.g. "com.ibm.team.apt.storyWorkflow.state.s3", see list_workflow) sent as
+            rtc_cm:state; a state title is accepted only together with `type` (resolved by that type's
+            workflow); otherwise pass the id
+        owner: user id (e.g. "jdoe") or user URI, always sent as a URI (dcterms:contributor)
+        planned_for: iteration URI (rtc_cm:plannedFor, see list_iterations)
+    A filter value with a double quote, angle bracket, backslash or non-printable character is refused.
+    The raw `query` is combined with the filters only with `and`: `or` is not supported (oslc.where has
+    no disjunction), so a `query` containing `or` is not guaranteed to work.
+
+    Follows the server's pages until `limit` items (default 50, maximum 1000).
+    Returns {"items": [...], "truncated": bool}; truncated=True means the query has more items.
+    """
+    clauses = [query] if query else []
+    clauses += await oslc.workitem_filters(project, type=type, state=state, owner=owner, planned_for=planned_for)
+    query = " and ".join(clauses) or None
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
-    results = await oslc.query_resources("ccm", project, query, select=select)
+    results = await oslc.query_resources("ccm", project, query, select=select, limit=limit)
     parsed = []
     for item in results:
         entry = {"rdf:about": item.get("rdf:about", item.get("rdf:resource", ""))}
@@ -100,7 +132,7 @@ async def list_workitems(project: str, query: str | None = None) -> list[dict]:
             c = item["dcterms:contributor"]
             entry["owner"] = c.get("rdf:resource", c) if isinstance(c, dict) else c
         parsed.append(entry)
-    return parsed
+    return {"items": parsed, "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool
@@ -111,12 +143,14 @@ async def get_workitem(id: str) -> dict:
 
 
 @read_tool
-async def search_testcases(project: str, query: str | None = None) -> list[dict]:
-    """Search test cases in an ETM project. Query uses oslc.where syntax."""
-    return await oslc.query_resources("qm", project, query)
+async def search_testcases(project: str, query: str | None = None) -> dict:
+    """Search test cases in an ETM project. Query uses oslc.where syntax.
 
-
-TYPE_IDS = oslc.CCM_TYPE_IDS
+    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
+    truncated=True means the query has more items than were returned.
+    """
+    results = await oslc.query_resources("qm", project, query, limit=oslc.MAX_QUERY_LIMIT)
+    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool
@@ -136,7 +170,9 @@ async def list_iterations(project: str) -> list[dict]:
         iter_uri = r.get("rdf:resource")
         if not iter_uri:
             continue
-        detail = await client.get(iter_uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+        detail = await client.get(
+            oslc.assert_same_origin(iter_uri), headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+        )
         if detail.status_code != 200:
             continue
         d = detail.json()
@@ -172,6 +208,7 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
         return {"error": "Provide either 'plan' (iteration name) or 'item_ids' (list of IB IDs)"}
 
     iteration_info = None
+    truncated = False
 
     if item_ids:
         # Direct mode: expand given IB IDs
@@ -190,8 +227,9 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
 
         # Get all IBs (type=story) and filter by plannedFor
         all_items = await oslc.query_resources(
-            "ccm", project, None, select="dcterms:title,dcterms:identifier,dcterms:type"
+            "ccm", project, None, select="dcterms:title,dcterms:identifier,dcterms:type", limit=oslc.MAX_QUERY_LIMIT
         )
+        truncated = getattr(all_items, "truncated", False)
         ib_ids_to_fetch = []
         for item in all_items:
             item_type = item.get("dcterms:type", "")
@@ -244,7 +282,7 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
             }
         )
 
-    result = {"items_count": len(result_items), "items": result_items}
+    result = {"items_count": len(result_items), "items": result_items, "truncated": truncated}
     if iteration_info:
         result["iteration"] = iteration_info["title"]
         result["start_date"] = iteration_info["start_date"]
@@ -268,21 +306,21 @@ async def create_workitem(
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
         title: Work item title (required)
-        type: "task" or "story" (default: "task"). Other types from list_types are not accepted yet (SPEC-wi-custom-types).
+        type: Any work item type of the project (default: "task"): the id or title shown by list_types, or a short alias such as task or story. An unknown type is refused listing the available ones.
         description: HTML description (optional)
         parent_id: Parent work item ID (optional)
         owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
         filed_against: Category URI (optional). If not provided, the property is not sent and the server applies its own default. Valid values: list_fields (property filedAgainst, allowedValues).
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
-    if type not in TYPE_IDS:
-        raise ToolError(f"Invalid type '{type}'. Must be one of: {list(TYPE_IDS.keys())}")
     project_url = await oslc._resolve_project_url("ccm", project)
+    factory = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)
+    type_id = factory["id"]
     project_area_id = oslc._project_area_id(project_url)
     payload: dict = {
         "dcterms:title": title,
         "dcterms:type": "http://open-services.net/ns/cm#ChangeRequest",
-        "rtc_cm:type": {"rdf:resource": f"{settings.elm_url}/ccm/oslc/types/{project_area_id}/{TYPE_IDS[type]}"},
+        "rtc_cm:type": {"rdf:resource": f"{settings.elm_url}/ccm/oslc/types/{project_area_id}/{type_id}"},
     }
     if description:
         payload["dcterms:description"] = description
@@ -301,7 +339,7 @@ async def create_workitem(
     # Inject custom fields (project-specific customizations)
     if custom_fields:
         payload.update(custom_fields)
-    return await oslc.create_resource("ccm", project, payload, wi_type=type)
+    return await oslc.create_resource("ccm", project, payload, factory=factory, project_url=project_url)
 
 
 @tool
@@ -384,6 +422,86 @@ async def transition_workitem(id: str, action: str) -> str:
 
 
 @tool
+async def add_comment(id: str, text: str) -> dict:
+    """Add a comment to a work item and confirm it appears in the discussion.
+
+    Args:
+        id: Work item ID (number)
+        text: Comment text
+
+    Returns the new comment {"id", "author", "created", "text"}. If the server accepts the POST but
+    the comment does not appear, the call fails WITHOUT resending it (check the item before retrying).
+    """
+    return await oslc.add_comment(id, text)
+
+
+@read_tool
+async def list_comments(id: str) -> list[dict]:
+    """List the comments of a work item: [{"id", "author", "created", "text"}] in thread order."""
+    return await oslc.list_comments(id)
+
+
+@tool
+async def link_workitems(source: str, target: str, link_type: str) -> dict:
+    """Link work item `source` to `target`, keeping the existing links of that type.
+
+    Args:
+        source: Work item ID that receives the link
+        target: Work item ID linked to
+        link_type: parent | blocks | depends_on | related | duplicate_of | resolves
+            ("parent" replaces the current parent: a work item has one parent)
+
+    Confirmed by re-reading the source. Returns {"source", "target", "link_type", "property", "changed"}.
+    """
+    return await oslc.link_workitems(source, target, link_type)
+
+
+@tool
+async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
+    """Remove only the `link_type` link from `source` to `target` (other links are kept).
+
+    Args:
+        source: Work item ID that holds the link
+        target: Work item ID to unlink
+        link_type: parent | blocks | depends_on | related | duplicate_of | resolves
+
+    Confirmed by re-reading the source. Returns {"source", "target", "link_type", "property", "changed"}.
+    """
+    return await oslc.unlink_workitems(source, target, link_type)
+
+
+@tool
+async def set_field(id: str, field: str, value: str) -> dict:
+    """Set one field of a work item via a partial PUT (If-Match).
+
+    Args:
+        id: Work item ID (number)
+        field: Prefixed property (e.g. "rtc_cm:storyPoints", "dcterms:title") or the shape's
+            property name (e.g. "storyPoints", see list_fields)
+        value: The value. For an enumerated field: the literal title (e.g. "5 pts") or literal id;
+            a value outside allowedValues is refused listing the valid ones.
+
+    Returns {"id", "field", "value", "warnings"}; warnings say when "Unassigned" was written to a
+    required attribute (the server treats it as empty).
+    """
+    return await oslc.set_field(id, field, value)
+
+
+@read_tool
+async def list_workflow(project: str, type: str) -> dict:
+    """List the workflow of a work item type: states (id, title, group) and action ids.
+
+    Args:
+        project: Project name
+        type: Type id, title or short alias (as in list_types / create_workitem)
+
+    Returns {"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}.
+    The action ids are the values accepted by transition_workitem.
+    """
+    return await oslc.list_workflow(project, type)
+
+
+@tool
 async def create_requirement(
     project: str,
     title: str,
@@ -451,8 +569,7 @@ async def list_types(domain: str, project: str) -> list[dict]:
     Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
     creation factory of a work item type:
     [{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]
-    ("id" is valid for list_fields; create_workitem accepts only "task" or "story" for now.
-    Arbitrary types are planned in SPEC-wi-custom-types.)
+    ("id" is valid for list_fields and create_workitem, which also take the title or a short alias.)
     """
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
@@ -468,7 +585,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
         domain: rm | ccm | qm
         project: Project name
         type: Shape title (as shown by list_types); matched case-insensitively.
-            For ccm: the type id or title from list_types, or the alias task/story.
+            For ccm: the type id or title from list_types, or a short alias (task, story...).
 
     Returns {"type", "shape_uri", "required":[...], "optional":[...]}; each field has
     name, title, occurs, read_only, property_uri, range_uri and allowed_values.

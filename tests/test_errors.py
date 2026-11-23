@@ -39,11 +39,11 @@ async def test_catalog_url_401():
 async def test_get_resource_404():
     with patch("elm_mcp.oslc.get_client", new_callable=AsyncMock) as mock_client:
         client = AsyncMock()
-        resp = httpx.Response(404, request=httpx.Request("GET", "http://test/rm/req/999"))
+        resp = httpx.Response(404, request=httpx.Request("GET", "https://elm.example.com/rm/req/999"))
         client.get.return_value = resp
         mock_client.return_value = client
         with pytest.raises(ValueError, match="recurso-inexistente-ou-invisivel"):
-            await get_resource("http://test/rm/req/999")
+            await get_resource("https://elm.example.com/rm/req/999")
 
 
 @pytest.mark.asyncio

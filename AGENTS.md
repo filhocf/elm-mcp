@@ -13,7 +13,7 @@ src/elm_mcp/
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
-└── server.py         # MCP server with 19 tools (12 read-only, 7 write)
+└── server.py         # MCP server with 25 tools (14 read-only, 11 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking
@@ -38,6 +38,8 @@ Client → FastMCP (stdio) → server.py → oslc.py → auth.py (cookies) → E
 - **Auth**: Jazz form-based (`/jts/j_security_check`). Failure detected via `X-com-ibm-team-repository-web-auth-msg` header
 - **SSL**: `verify=False` (internal certificates)
 - **Naming**: snake_case functions, PascalCase classes
+- **Queries**: `oslc.query_resources(..., limit=None)` follows `oslc:nextPage` (default 50, cap 1000, dedup by `rdf:about`) and returns a list with a `truncated` attribute; `list_workitems` wraps it as `{"items", "truncated"}`.
+- **Work item types**: never hardcode a type map or organization type id; `create_workitem` resolves the type from the project's typed creation factories (`_resolve_ccm_type`).
 
 ## Domain-Specific Patterns (ELM 7.0.3)
 

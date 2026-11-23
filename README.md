@@ -62,6 +62,11 @@ export ELM_USER=your_username
 export ELM_PASSWORD=secret
 ```
 
+`ELM_URL` must be exactly the public URL the server announces (same scheme, host and port that appear in the
+URLs of its responses). The client only follows URLs, and redirects, on that origin; a server that announces
+another host name (internal name, http vs https, different port) makes calls fail with "outside the configured
+ELM server". Redirects are checked before being followed, so a 302 to another host is refused.
+
 ### Register with your MCP client
 
 ```json
@@ -123,7 +128,7 @@ Conventions (language, tenant-neutrality, EARS requirements, traceability) are i
 
 ## Status
 
-Early but structured. Core read + CCM work-item write is working; requirement write (RM), discovery
+Early but structured. Core read + CCM work-item write (including comments, work item links, field edits and workflow listing) is working; requirement write (RM), discovery
 tools, OSLC links, test write (QM) and reporting are on the [roadmap](docs/roadmap.md).
 Tested against IBM ELM 7.0.3.
 

@@ -40,6 +40,22 @@
       ]
     },
     {
+      "name": "add_comment",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "create_requirement",
       "read_only": false,
       "parameters": [
@@ -192,6 +208,38 @@
       ]
     },
     {
+      "name": "link_workitems",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_comments",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "list_fields",
       "read_only": true,
       "parameters": [
@@ -262,6 +310,22 @@
       ]
     },
     {
+      "name": "list_workflow",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "list_workitems",
       "read_only": true,
       "parameters": [
@@ -272,6 +336,36 @@
         },
         {
           "name": "query",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "limit",
+          "type": "integer|null",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "type",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "state",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "owner",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "planned_for",
           "type": "null|string",
           "required": false,
           "default": null
@@ -313,6 +407,27 @@
       ]
     },
     {
+      "name": "set_field",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "field",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "transition_workitem",
       "read_only": false,
       "parameters": [
@@ -323,6 +438,27 @@
         },
         {
           "name": "action",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "unlink_workitems",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "source",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
           "type": "string",
           "required": true
         }

@@ -1,14 +1,17 @@
 # MEMORY.md — elm-mcp
 
-## Estado Atual (18/mai/2026)
+## Estado Atual (nov/2026)
 
-- **Versão**: 0.1.0 (10 commits, branch main)
+- **Versão**: 0.4.0 publicada; onda W2 (colaboração CCM, v0.6.0) em desenvolvimento na branch `feat/w2-colaboracao`, ainda sem release
+- **Tools**: 25 (14 de leitura, 11 de escrita); lista completa e assinaturas em `docs/TOOLS.md`
 - **Repo**: https://github.com/filhocf/elm-mcp
 - **Status**: ✅ Testado end-to-end contra ELM real
 
 ## Feito
 
-- 6 tools: list_projects, search_requirements, get_requirement, list_workitems, get_workitem, search_testcases
+- 25 tools (ver `docs/TOOLS.md`). Na origem (v0.1.0) eram 6: list_projects, search_requirements, get_requirement, list_workitems, get_workitem, search_testcases
+- W2: add_comment, list_comments, link_workitems, unlink_workitems, set_field, list_workflow, filtros de list_workitems, paginação por `oslc:nextPage` ({"items","truncated"} em list_workitems, search_requirements, search_testcases)
+- W2 (loop 2 do G5): toda URL seguida de resposta do servidor fica no mesmo scheme/host/porta de `ELM_URL`; paginação com teto de 100 páginas e detecção de ciclo; `add_comment` envia o texto escapado (HTML) e confirma pelo id novo
 - Auth: form-based Jazz com cookies (httpx AsyncClient singleton)
 - Config: env vars + ~/.elm_creds.json (base64 password)
 - CLI: `elm-mcp login` (setup interativo) + `elm-mcp serve` (MCP stdio)
@@ -17,7 +20,7 @@
 - RM: endpoint /views com projectURL (DOORS Next não expõe QueryCapability padrão)
 - QM: fallback XML quando JSON retorna 406
 - CCM: derivação de /services a partir da URL do catalog
-- Testes: 21 passando, coverage 62%
+- Testes: suíte local sem rede (respx; a rede real é bloqueada pelo conftest)
 - CI: GitHub Actions (lint + test + coverage) + CodeQL + Dependabot + Publish
 - Gemini Code Assist: ativo
 - Conformidade DEVELOPMENT-STANDARDS.md: ✅
