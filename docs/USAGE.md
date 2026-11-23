@@ -13,13 +13,18 @@ OSLC query syntax. Examples:
 list_workitems(project="MY PROJECT (KEY)", query='dcterms:title="Some title"')
 
 # By iteration (plannedFor)
-list_workitems(project="MY PROJECT (KEY)", query='rtc_cm:plannedFor=<https://elm.company.com/ccm/oslc/iterations/_ITERATION_OID>')
+list_workitems(
+    project="MY PROJECT (KEY)", query="rtc_cm:plannedFor=<https://elm.company.com/ccm/oslc/iterations/_ITERATION_OID>"
+)
 
 # By type
 list_workitems(project="MY PROJECT (KEY)", query='dcterms:type="Task"')
 
 # By state
-list_workitems(project="MY PROJECT (KEY)", query='rtc_cm:state=<https://elm.company.com/ccm/oslc/workflows/_WORKFLOW_OID/states/com.ibm.team.workitem.taskWorkflow/com.ibm.team.workitem.taskWorkflow.state.s1>')
+list_workitems(
+    project="MY PROJECT (KEY)",
+    query="rtc_cm:state=<https://elm.company.com/ccm/oslc/workflows/_WORKFLOW_OID/states/com.ibm.team.workitem.taskWorkflow/com.ibm.team.workitem.taskWorkflow.state.s1>",
+)
 ```
 
 ## Discovery (before you write)
