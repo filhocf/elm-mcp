@@ -23,7 +23,7 @@
     xmlns:jrs="http://jazz.net/ns/jrs#"
     xmlns:foaf="http://xmlns.com/foaf/0.1/"
     xmlns:oslc_auto="http://open-services.net/ns/auto#"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema#" > 
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema#" >
  <rdf:Description rdf:nodeID="A0">
   <rdf:subject rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001"/>
   <rdf:predicate rdf:resource="http://open-services.net/ns/qm#validatesRequirement"/>
