@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import cache, hours, oslc, profile, qm
+from . import attachments, cache, hours, oslc, profile, qm
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -425,6 +425,32 @@ async def get_hours(
     result = await hours.collect_hours(ids, group_by, max_entries)
     result["truncated"] = selection["truncated"]
     return result
+
+
+@read_tool
+async def list_attachments(id: str) -> list[dict]:
+    """List the attachments of a work item: [{"uri", "name", "identifier", "format", "creator", "created"}].
+
+    `name` has no identifier prefix; `size` appears when the server reports it. Only metadata is read (JSON),
+    never the content. Read only.
+    """
+    return await attachments.list_attachments(id)
+
+
+@read_tool
+async def download_attachment(id: str, attachment: str, dest: str, overwrite: bool = False) -> dict:
+    """Download an attachment of a work item to a LOCAL file; it never writes to the ALM.
+
+    Args:
+        id: work item ID
+        attachment: the attachment identifier, its exact name, or its URI (see list_attachments)
+        dest: an existing directory (the file takes the server's name, base name only) or a file path
+        overwrite: replace an existing file (default False: an existing file is refused)
+
+    The size is capped by ELM_MAX_DOWNLOAD_MB (default 50); a refused or failed download leaves no file.
+    Returns {"path", "size"}. The tool is read only toward the ALM (it only issues GET requests).
+    """
+    return await attachments.download_attachment(id, attachment, dest, overwrite)
 
 
 @tool
