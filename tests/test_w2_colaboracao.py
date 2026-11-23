@@ -40,13 +40,13 @@ from .w2_fixtures import (
 )
 
 LINK_PREFIX = "rtc_cm:com.ibm.team.workitem.linktype."
-# Link type (tool argument) -> work item property. "parent" is the property create_workitem already writes.
+# Link type (tool argument) -> work item property. Names verified read-only on the real server (7.0.1).
 LINK_PROPS = {
     "parent": LINK_PREFIX + "parentworkitem.parent",
     "blocks": LINK_PREFIX + "blocksworkitem.blocks",
-    "depends_on": LINK_PREFIX + "dependsonworkitem.dependson",
+    "depends_on": LINK_PREFIX + "blocksworkitem.dependsOn",
     "related": LINK_PREFIX + "relatedworkitem.related",
-    "duplicate_of": LINK_PREFIX + "duplicateworkitem.duplicateof",
+    "duplicate_of": LINK_PREFIX + "duplicateworkitem.duplicateOf",
     "resolves": LINK_PREFIX + "resolvesworkitem.resolves",
 }
 RELATED = LINK_PROPS["related"]
