@@ -1,6 +1,6 @@
 # SPEC — Correções RM e modo changeset
 
-**Status:** PLANNED · **Release:** v0.5.1 (D3, D7, D8) e v0.6.0 (changeset) · **Guarda-chuva:** `SPEC-ewm-delta` F2
+**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F2
 
 ## Defeitos
 | # | Tool | Sintoma observado | Correção |

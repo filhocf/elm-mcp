@@ -1,6 +1,6 @@
 # SPEC — QM write (escrita no ETM: test case/plan/script/execution/result)
 
-**Status:** PLANNED (G0 parcial feito) · **Release:** v0.8.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-ccm-colaboracao` (links)
+**Status:** PLANNED (G0 parcial feito) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-ccm-colaboracao` (links)
 **Classe:** entregável de produto — fecha o ciclo RM→QM→CM
 
 ## Meta

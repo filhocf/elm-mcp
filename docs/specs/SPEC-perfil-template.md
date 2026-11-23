@@ -1,6 +1,6 @@
 # SPEC — Perfil por template de processo
 
-**Status:** PLANNED · **Release:** v0.7.0 · **Guarda-chuva:** `SPEC-ewm-delta` F4 · **ADR:** ADR-003
+**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F4 · **ADR:** ADR-003
 
 ## Meta
 Fornecer, fora do pacote, os valores que a API não dá ou que mudam por instalação, organizados **por template de processo**
