@@ -716,10 +716,11 @@ async def test_d11_update_workitem_403_with_oslc_message_raises_toolerror_with_m
 
 
 # ======================================================================
-# D13 (loop 1) — default category comes from the filedAgainst property of the TYPE shape
+# D13 (revised) — no automatic category: filed_against is sent only when the caller gives it
 # ======================================================================
 FILED_AGAINST_TAG = "}filedAgainst"
 CATEGORIES_PATH = "/ccm/oslc/categories"
+CATEGORY_ERROR_MESSAGE = "Attribute Filed Against needs to be set"
 
 
 def _filed_against_uris(body: str) -> list[str]:
@@ -731,55 +732,67 @@ def _categories_calls() -> list:
     return [c for c in respx.calls if CATEGORIES_PATH in str(c.request.url)]
 
 
-def _setup_d13(type_id: str, props: list[dict], allowed: list[str] | None = None) -> None:
-    _setup_create(type_id)  # discovery + creation context (legacy /categories decoy, shapes mocked) + POST mocks
-    respx.get(f.shape_uri(type_id)).mock(return_value=httpx.Response(200, text=f.real_shape_xml(type_id, props)))
-    if allowed is not None:
-        respx.get(f.allowed_values_url(type_id)).mock(
-            return_value=httpx.Response(200, text=f.allowed_values_xml(type_id, allowed))
-        )
+def _shape_calls(type_id: str) -> list:
+    """GETs on the type shape or its allowedValues (what the removed default lookup used)."""
+    base = f.shape_uri(type_id)
+    return [c for c in respx.calls if c.request.method == "GET" and str(c.request.url).startswith(base)]
 
 
 @pytest.mark.parametrize("type_arg", ["task", "story"])
 @respx.mock
-async def test_d13_create_workitem_uses_shape_default_value_for_filed_against(type_arg):
-    """D13: no filed_against -> rtc_cm:filedAgainst = oslc:defaultValue of the type shape's filedAgainst
-    (about …/property/category), not the priority default, not a /categories result."""
+async def test_d13_create_workitem_without_filed_against_omits_the_property(type_arg):
+    """D13: no filed_against -> the POST body has no rtc_cm:filedAgainst (server default applies),
+    even though the type shape carries a defaultValue."""
     type_id = {"task": "task", "story": STORY_ID}[type_arg]
-    _setup_d13(type_id, f.default_task_props(), [f.CAT_DEFAULT, f.CAT_2])
+    _setup_create(type_id)
     await create_workitem(project=PROJECT, title="T", type=type_arg)
-    assert _filed_against_uris(_posted_body()) == [f.CAT_DEFAULT]
+    body = _posted_body()
+    assert "filedAgainst" not in body
+    assert _filed_against_uris(body) == []
 
 
+@pytest.mark.parametrize("type_arg", ["task", "story"])
 @respx.mock
-async def test_d13_create_workitem_without_default_value_uses_first_allowed_value():
-    """D13: filedAgainst without oslc:defaultValue -> first oslc:allowedValue of that property."""
-    props = [
-        f.prop("priority", "Priority", default=f"{BASE}/ccm/oslc/enumerations/_PA1/priority/medium"),
-        f.filed_against_prop(default=None, allowed=f.allowed_values_url("task")),
-    ]
-    _setup_d13("task", props, [f.CAT_2, f.CAT_3])
-    await create_workitem(project=PROJECT, title="T", type="task")
-    assert _filed_against_uris(_posted_body()) == [f.CAT_2]
-
-
-@pytest.mark.parametrize("with_default", [True, False], ids=["default-value", "first-allowed"])
-@respx.mock
-async def test_d13_create_workitem_never_calls_the_categories_route(with_default):
-    """D13: /ccm/oslc/categories ignores the project filter (categories of other areas) -> must not be called."""
-    props = [
-        f.filed_against_prop(default=f.CAT_DEFAULT if with_default else None, allowed=f.allowed_values_url("task"))
-    ]
-    _setup_d13("task", props, [f.CAT_2, f.CAT_3])
-    await create_workitem(project=PROJECT, title="T", type="task")
+async def test_d13_create_workitem_without_filed_against_does_not_look_up_a_category(type_arg):
+    """D13: no categories route call, no shape/allowedValues read for a default category."""
+    type_id = {"task": "task", "story": STORY_ID}[type_arg]
+    _setup_create(type_id)
+    await create_workitem(project=PROJECT, title="T", type=type_arg)
     assert _categories_calls() == []
+    assert _shape_calls(type_id) == []
     assert "_OTHERPA" not in _posted_body()
 
 
 @respx.mock
-async def test_d13_create_workitem_explicit_filed_against_wins():
-    """D13: explicit filed_against is sent as is, even if the shape has another default."""
-    _setup_d13("task", f.default_task_props(), [f.CAT_DEFAULT, f.CAT_2])
+async def test_d13_create_workitem_explicit_filed_against_is_sent_as_is():
+    """D13: explicit filed_against goes out unchanged (not the shape default), no category lookup."""
+    _setup_create("task")
     await create_workitem(project=PROJECT, title="T", type="task", filed_against=f.CAT_2)
     assert _filed_against_uris(_posted_body()) == [f.CAT_2]
     assert _categories_calls() == []
+    assert _shape_calls("task") == []
+
+
+@respx.mock
+async def test_d13_category_refusal_toolerror_has_server_message_and_list_fields_hint():
+    """D13: 403 with an oslc:message about the category -> ToolError carries the server text
+    and points to list_fields (filedAgainst); single POST, no retry."""
+    auth, typed, generic = _setup_create("task")
+    typed.mock(return_value=httpx.Response(403, json={"oslc:message": CATEGORY_ERROR_MESSAGE}))
+    with pytest.raises(ToolError) as exc:
+        await create_workitem(project=PROJECT, title="T", type="task")
+    text = str(exc.value)
+    assert CATEGORY_ERROR_MESSAGE in text
+    assert "list_fields" in text
+    assert typed.call_count == 1
+
+
+@respx.mock
+async def test_d13_non_category_refusal_has_no_list_fields_hint():
+    """D13: the hint is only for category refusals; an unrelated 403 message stays untouched."""
+    _, typed, _ = _setup_create("task")
+    typed.mock(return_value=httpx.Response(403, json={"oslc:message": SERVER_MESSAGE}))
+    with pytest.raises(ToolError) as exc:
+        await create_workitem(project=PROJECT, title="T", type="task")
+    assert SERVER_MESSAGE in str(exc.value)
+    assert "list_fields" not in str(exc.value)

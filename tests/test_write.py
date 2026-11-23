@@ -79,8 +79,8 @@ def _mock_auth():
 
 
 def _mock_type_shapes(category_uri: str) -> None:
-    """F1/D13: the default category comes from the type's shape (oslc:defaultValue of filedAgainst),
-    in the real CCM format (rdf:Description typed core#Property), not from /ccm/oslc/categories."""
+    """Decoy shape (real CCM format) whose filedAgainst default must NOT be used (D13 revised:
+    no automatic category; the mock only keeps unrelated tests from failing on an unmocked GET)."""
     shape = f"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
         xmlns:dcterms="http://purl.org/dc/terms/" xmlns:oslc="http://open-services.net/ns/core#">
       <rdf:Description rdf:about="{BASE}/shape/property/category">
@@ -445,24 +445,28 @@ async def test_golden_content_type_is_rdf_xml():
 
 @respx.mock
 async def test_golden_category_uses_itemoid_format():
-    """filedAgainst must use /resource/itemOid/com.ibm.team.workitem.Category/{oid} format."""
-    _mock_auth()
-    respx.get(f"{BASE}/ccm/rootservices").mock(return_value=httpx.Response(200, text=CCM_ROOTSERVICES_XML))
-    respx.get(f"{BASE}/ccm/oslc/workitems/catalog").mock(return_value=httpx.Response(200, text=CCM_CATALOG_XML))
-    respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/services").mock(
-        return_value=httpx.Response(200, text=CCM_SERVICES_XML)
+    """An explicit filed_against in /resource/itemOid/com.ibm.team.workitem.Category/{oid} format
+    is sent as is; the shape default is ignored (D13 revised)."""
+    _mock_ccm_discovery()
+    post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
+        return_value=httpx.Response(201, json=CREATED_WI)
     )
-    # The type's shape carries the itemOid category as filedAgainst default
-    _mock_type_shapes(f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}")
-    respx.get(f"{BASE}/ccm/oslc/iterations").mock(return_value=httpx.Response(200, json={"oslc:results": []}))
-    # Session refresh GET (create_resource does this before POST)
-    respx.get(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems").mock(return_value=httpx.Response(200, json={}))
+    category = f"{BASE}/ccm/resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}"
+    await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", filed_against=category)
+    body = post_route.calls[0].request.content.decode()
+    assert f"resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}" in body
+    assert "/categories/_MWxBEJB7Ee-fe_bes9r78g/default" not in body
+
+
+@respx.mock
+async def test_create_workitem_without_filed_against_omits_it_and_ignores_shape_default():
+    """No filed_against -> body has no filedAgainst (decoy shape default not used)."""
+    _mock_ccm_discovery()
     post_route = respx.post(f"{BASE}/ccm/oslc/contexts/{PROJECT_AREA_ID}/workitems/task").mock(
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task")
-    body = post_route.calls[0].request.content.decode()
-    assert f"resource/itemOid/com.ibm.team.workitem.Category/{CATEGORY_OID}" in body
+    assert "filedAgainst" not in post_route.calls[0].request.content.decode()
 
 
 @respx.mock
