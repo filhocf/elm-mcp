@@ -1,5 +1,6 @@
 """OSLC service discovery and query builder for IBM ELM."""
 
+import html as _html
 import logging
 import re as _re
 from xml.etree import ElementTree as ET
@@ -390,9 +391,14 @@ async def create_resource(domain: str, project: str, payload: dict, wi_type: str
         "OSLC-Core-Version": "2.0",
     }
     resp = await client.post(creation_url, content=rdfxml_body, headers=post_headers)
-    # Re-authenticate only on an expired session (401 / login redirect). A 403 carries the
-    # server's business rule (oslc:message) and must not be resent.
-    if resp.status_code == 401 or "j_security_check" in str(resp.headers.get("location", "")):
+    # Re-authenticate (once) on an expired session: 401, login redirect, or a 403 without
+    # oslc:message (stale CSRF/session). A 403 with oslc:message is the server's business rule
+    # and must not be resent.
+    if (
+        resp.status_code == 401
+        or "j_security_check" in str(resp.headers.get("location", ""))
+        or (resp.status_code == 403 and _write_message(resp) is None)
+    ):
         from .auth import _authenticate
 
         await _authenticate(client)
@@ -452,10 +458,25 @@ def _last_segment(uri: str) -> str:
     return _re.split(r"[/#]", uri.rstrip("/"))[-1]
 
 
+_MIN_ACTION_MATCH_LEN = 2
+
+
 def _resolve_workflow_action(action: str, action_ids: list[str]) -> str:
-    """Resolve `action` to one workflow action id: exact, then '.{action}' suffix, then unique substring."""
+    """Resolve `action` to one workflow action id: exact, then '.{action}' suffix, then unique substring.
+
+    Blank input is refused and suffix/substring matching needs at least 2 characters, so a
+    trivial value cannot match (and execute) an arbitrary action.
+    """
+    action = action.strip()
+    if not action:
+        raise ValueError(f"Action must not be empty. Available actions: {action_ids}")
     if action in action_ids:
         return action
+    if len(action) < _MIN_ACTION_MATCH_LEN:
+        raise ValueError(
+            f"Action '{action}' is too short to match by suffix or substring "
+            f"(min {_MIN_ACTION_MATCH_LEN} characters). Available actions: {action_ids}"
+        )
     suffixed = [a for a in action_ids if a.endswith(f".{action}")]
     if len(suffixed) == 1:
         return suffixed[0]
@@ -890,7 +911,7 @@ async def _list_ccm_creation_factories(project_url: str) -> list[dict]:
             continue
         shape = _re.search(r"<\w*:?resourceShape\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
         title_m = _re.search(r"<\w*:?title[^>]*>([^<]*)</\w*:?title>", block)
-        raw_title = title_m.group(1) if title_m else ""
+        raw_title = _html.unescape(title_m.group(1)) if title_m else ""
         named = _FACTORY_TITLE_RE.match(raw_title.strip())
         factories.append(
             {

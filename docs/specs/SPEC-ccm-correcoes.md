@@ -35,7 +35,7 @@ O parser DEVE aceitar os dois formatos (elemento `oslc:Property` e `rdf:Descript
 - QUANDO `list_types("ccm", projeto)` for chamado, o sistema DEVE retornar um item por fábrica de criação, com título, identificador do tipo, URI da fábrica e URI do shape, e NÃO DEVE retornar propriedades de shape.
 - QUANDO `list_fields("ccm", projeto, tipo)` receber o identificador ou o título de um tipo listado, o sistema DEVE retornar as propriedades do shape com ocorrência, somente-leitura e `allowedValues`, nos dois formatos de shape descritos acima.
 - SE o shape tiver propriedades e o parser não extrair nenhuma, ENTÃO o sistema DEVE levantar `ToolError` em vez de devolver listas vazias.
-- QUANDO `create_workitem` for chamado sem `filed_against`, o sistema DEVE usar o `oslc:defaultValue` da propriedade `filedAgainst` do shape do tipo e, na falta dele, o primeiro valor de `oslc:allowedValues` dessa propriedade; o sistema NÃO DEVE usar categorias de outra project area.
+- QUANDO `create_workitem` for chamado sem `filed_against`, o sistema NÃO DEVE enviar `rtc_cm:filedAgainst` (vale o default do servidor) nem escolher categoria automaticamente (D13).
 - QUANDO `owner` for informado em criação ou atualização, o sistema DEVE gravá-lo em `dcterms:contributor`.
 - QUANDO `create_workitem` for chamado, o sistema DEVE enviar o POST à fábrica de criação do tipo pedido.
 - SE o servidor recusar uma escrita com `oslc:message`, ENTÃO o sistema DEVE levantar `ToolError` contendo essa mensagem.

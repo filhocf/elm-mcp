@@ -253,7 +253,7 @@ async def create_workitem(
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
         title: Work item title (required)
-        type: "task" or "story" (default: "task")
+        type: "task" or "story" (default: "task"). Other types from list_types are not accepted yet (SPEC-wi-custom-types).
         description: HTML description (optional)
         parent_id: Parent work item ID (optional)
         owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
@@ -276,7 +276,7 @@ async def create_workitem(
             {"rdf:resource": f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{parent_id}"}
         ]
     if owner:
-        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner)}"}
+        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner, safe='')}"}
     if filed_against:
         payload["rtc_cm:filedAgainst"] = {"rdf:resource": filed_against}
     # Auto-discover current iteration
@@ -316,7 +316,7 @@ async def update_workitem(
     if description is not None:
         payload["dcterms:description"] = description
     if owner is not None:
-        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner)}"}
+        payload["dcterms:contributor"] = {"rdf:resource": f"{settings.elm_url}/jts/users/{quote(owner, safe='')}"}
     if estimate_hours is not None:
         payload["rtc_cm:estimate"] = int(estimate_hours * 3600000)
     if planned_for is not None:
@@ -419,7 +419,8 @@ async def list_types(domain: str, project: str) -> list[dict]:
     Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
     creation factory of a work item type:
     [{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]
-    (use "id" as the work item type).
+    ("id" is valid for list_fields; create_workitem accepts only "task" or "story" for now.
+    Arbitrary types are planned in SPEC-wi-custom-types.)
     """
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
