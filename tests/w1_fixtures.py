@@ -77,8 +77,33 @@ def _shape_xml(uri: str, title: str) -> str:
 
 
 FOLDERS_JSON = {
-    f"{BASE}/rm/folders/_root": {"http://purl.org/dc/terms/title": [{"value": "root"}]},
-    f"{BASE}/rm/folders/_reqs": {"http://purl.org/dc/terms/title": [{"value": "Requirements"}]},
+    f"{BASE}/rm/folders/FR_ROOT": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#folder"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "root"}],
+        "http://jazz.net/ns/rm/navigation#subfolders": [
+            {"type": "uri", "value": f"{BASE}/rm/folders?oslc.where=public_rm:parent={BASE}/rm/folders/FR_ROOT"}
+        ],
+    },
+    f"{BASE}/rm/folders/FR_REQS": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#folder"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "Requirements"}],
+    },
+    f"{BASE}/rm/folders?oslc.where=public_rm:parent={BASE}/process/project-areas/_PA1": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://open-services.net/ns/core#ResponseInfo"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "Folder Query Results: 2"}],
+    },
+    f"{BASE}/rm/folders": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#Description"}
+        ],
+        "http://www.w3.org/2000/01/rdf-schema#member": [{"type": "uri", "value": f"{BASE}/rm/folders/FR_ROOT"}],
+    },
 }
 
 CREATED_RDF = f"""<?xml version="1.0" encoding="UTF-8"?>

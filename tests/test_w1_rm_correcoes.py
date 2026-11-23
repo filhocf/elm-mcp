@@ -74,7 +74,7 @@ async def test_d3_list_folders_queries_parent_equal_to_project_area_uri():
     assert folders_route.call_count == 1
     where = folders_route.calls[0].request.url.params.get("oslc.where")
     assert where == f"public_rm:parent={PROJECT_AREA_URI}", f"folder query used {where!r}"
-    assert [f["title"] for f in result] == ["Requirements"]
+    assert [f["title"] for f in result] == ["root", "Requirements"]
 
 
 @respx.mock
