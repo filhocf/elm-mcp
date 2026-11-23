@@ -77,7 +77,9 @@ async def test_get_requirement():
 @pytest.mark.asyncio
 async def test_list_workitems():
     with patch("elm_mcp.server.oslc.query_resources", new_callable=AsyncMock) as mock:
-        mock.return_value = oslc.QueryResults([{"dcterms:title": "Bug #123", "dcterms:identifier": "123", "rdf:about": "http://x"}])
+        mock.return_value = oslc.QueryResults(
+            [{"dcterms:title": "Bug #123", "dcterms:identifier": "123", "rdf:about": "http://x"}]
+        )
         result = await list_workitems("PROJ", "oslc_cm:type='defect'")
         mock.assert_called_once_with(
             "ccm",
