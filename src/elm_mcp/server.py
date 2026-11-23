@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import attachments, cache, hours, oslc, profile, qm
+from . import attachments, cache, hours, oslc, profile, qm, qm_write
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -220,6 +220,85 @@ async def get_qm_resource(uri: str) -> dict:
     uses_test_script, runs_test_case, executes_test_script, test_results, ...
     """
     return await qm.get_resource(uri)
+
+
+@tool
+async def create_qm_resource(
+    project: str, type: str, title: str, description: str | None = None, if_exists: str = "error"
+) -> dict:
+    """Create an ETM resource by title (and description), via the creation factory of its type.
+
+    Args:
+        project: ETM project name
+        type: TestCase | TestPlan | TestSuite | TestScript (case-insensitive)
+        title: title of the new resource
+        description: optional description
+        if_exists: error (default, refuse a duplicate) | return (hand back the existing one) | create (skip the check)
+
+    Only the title and description are sent. TestCase is verified against a real ETM; TestPlan, TestSuite and
+    TestScript use the same factory pattern and are to be confirmed in live acceptance. TestExecutionRecord,
+    TestResult, native script steps and any other type are deferred (adiado) and refused. The duplicate check
+    compares the normalized title among resources of the same type; a POST is never resent after a timeout.
+
+    Returns {"uri", "short_id", "created"} (short_id read back from the server).
+    """
+    return await qm_write.create_resource(project, type, title, description, if_exists)
+
+
+@tool
+async def update_qm_resource(uri: str, title: str | None = None, description: str | None = None) -> dict:
+    """Change the title and/or description of an ETM TestCase, TestPlan, TestSuite or TestScript.
+
+    The resource is re-read and the complete RDF/XML goes back in a PUT with If-Match; everything else
+    (links, sections, dates) is preserved byte for byte. A stale ETag is a [conflito] error, never retried.
+
+    Returns {"uri", "updated": ["title", "description"]}.
+    """
+    return await qm_write.update_resource(uri, title, description)
+
+
+@tool
+async def delete_qm_resource(uri: str) -> dict:
+    """Delete an ETM resource via DELETE and confirm by re-reading it (404 or 410).
+
+    Irreversible. If the confirmation read is denied (401/403) the call fails saying the deletion was not
+    confirmed. Only ETM resources of the configured server are accepted.
+
+    Returns {"uri", "deleted": true}.
+    """
+    return await qm_write.delete_resource(uri)
+
+
+@tool
+async def link_test_case(test_case: str, target: str, link_type: str) -> dict:
+    """Link an ETM test case to a requirement or a work item, keeping every other property and link.
+
+    Args:
+        test_case: URI of the TestCase
+        target: URI of the destination, on the same ELM server
+        link_type: validatesRequirement (target = RM requirement) | testsChangeRequest (target = CCM work item)
+
+    Writes oslc_qm:<link_type> with the complete PUT + If-Match and confirms by re-reading (final set ==
+    expected). Linking an already linked target changes nothing. Live acceptance of the write is pending.
+
+    Returns {"test_case", "target", "link_type", "changed"}.
+    """
+    return await qm_write.change_link(test_case, target, link_type, add=True)
+
+
+@tool
+async def unlink_test_case(test_case: str, target: str, link_type: str) -> dict:
+    """Remove only the `link_type` link from a test case to `target` (the other links are kept).
+
+    Args:
+        test_case: URI of the TestCase
+        target: URI of the destination to unlink
+        link_type: validatesRequirement | testsChangeRequest
+
+    Same PUT + If-Match and confirmation by re-reading as link_test_case. Unlinking a target that is not linked
+    is an error. Returns {"test_case", "target", "link_type", "changed"}.
+    """
+    return await qm_write.change_link(test_case, target, link_type, add=False)
 
 
 @read_tool

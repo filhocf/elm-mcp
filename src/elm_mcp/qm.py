@@ -215,6 +215,45 @@ async def _query_base(project_url: str, type_name: str) -> str:
     raise ValueError(f"The project '{project_url}' has no query capability for QM type {type_name} ({local_wanted}).")
 
 
+async def creation_factory(project_url: str, type_name: str) -> str:
+    """Creation URL of the ``oslc:CreationFactory`` whose ``oslc:resourceType`` has local name ``<type>``.
+
+    Chosen by the resource type in either QM namespace (oslc_qm or rqm), never by title or position. No factory,
+    two different creation URLs (ambiguous) or a URL outside the ELM origin are errors: nothing is guessed.
+    """
+    client = await get_client()
+    wanted = {f"{ns}{type_name}" for ns in _QM_TYPE_NAMESPACES}
+    if project_url.endswith("services.xml"):
+        candidates = [project_url.replace("/services.xml", "/services"), project_url]
+    else:
+        candidates = [project_url.rstrip("/") + "/services", project_url]
+    last_error: ValueError | None = None
+    for url in candidates:
+        try:
+            root = await oslc._get_xml(client, url)
+        except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
+            if isinstance(exc, ValueError) and not isinstance(exc, ET.ParseError):
+                last_error = exc
+            continue
+        urls: list[str] = []
+        for factory in root.iter(f"{{{_CORE}}}CreationFactory"):
+            creation = factory.find(f"{{{_CORE}}}creation")
+            href = creation.get(f"{{{_RDF}}}resource") if creation is not None else None
+            types = {t.get(f"{{{_RDF}}}resource") for t in factory.findall(f"{{{_CORE}}}resourceType")}
+            if href and types & wanted and href not in urls:
+                urls.append(href)
+        if len(urls) > 1:
+            raise ValueError(
+                f"Ambiguous: the project '{project_url}' has {len(urls)} creation factories for {type_name}."
+            )
+        if not urls:
+            raise ValueError(f"The project '{project_url}' has no creation factory for QM type {type_name}.")
+        return oslc.assert_same_origin(urls[0])
+    if last_error is not None:
+        raise last_error
+    raise ValueError(f"The project '{project_url}' has no creation factory for QM type {type_name}.")
+
+
 async def query_members(
     project: str, type_name: str, where: str | None = None, limit: int | None = None
 ) -> tuple[list[dict], int | None, bool]:
