@@ -7,6 +7,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+Discovery cache and RM query (SPEC-cache-shape, SPEC-rm-consulta, wave W4):
+
+- Discovery cache in memory (provider, factories, shapes, allowedValues, workflow, RM stream), per server and project area; TTL from `ELM_CACHE_TTL` (default 300 s, `0` turns it off).
+- `refresh=True` on `list_types`, `list_fields` and `list_workflow` ignores the cache and repopulates it.
+- `search_requirements(project, query=None, limit=None)` accepts `limit` and returns `total` and `configuration` (the stream used) when known.
+
 ETM reading and cross-domain links (SPEC-qm-leitura, SPEC-oslc-links, wave W3):
 
 - `list_qm_resources(project, type, query=None, limit=None)`: lists any of the 14 ETM types, one item per resource, with `total` from `oslc:totalCount`.
@@ -37,6 +43,10 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- `search_requirements` now returns interpreted items (`uri`, `title`, `identifier`, `type`, `modified`, `folder`) instead of the raw RDF/JSON dictionary: a deliberate change of return.
+- RM queries discover the project's stream and send `Configuration-Context`, `oslc.prefix` (dcterms, oslc, rdf, nav, jazz_rm) and `oslc.select`; a project without a stream is queried without the header.
+- `create_workitem` rediscovers the project area once and resends once when the server answers 400 or 409 (stale shape or value); 403, 404 and 500 are not retried.
+
 - `search_testcases` now returns the normalized ETM format: one item per test case `{uri, title, identifier, short_id, state, type}` plus `truncated` (D12: the TestCase capability is chosen by `oslc:resourceType`, RDF/XML only).
 - `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
   `oslc.where` (combined with `query` by `and`); a filter value with a quote, angle bracket or backslash is refused.
@@ -62,6 +72,9 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
   `reopen` work only where the workflow's action ids contain those words.
 
 ### Fixed
+
+- `search_requirements` no longer answers 400 (`Undefined namespace prefix` / null configuration) on RM queries with `oslc.where`.
+- `search_requirements` returns one item per requirement instead of one giant raw dictionary, and takes the total from "Query Results: N".
 
 - D12: `search_testcases` returned one `raw_xml` blob of the first query capability (TestExecutionRecord); it now picks the TestCase capability by `oslc:resourceType` and returns one item per test case.
 

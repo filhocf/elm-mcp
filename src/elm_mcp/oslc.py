@@ -11,6 +11,7 @@ from xml.sax.saxutils import escape as _xml_escape
 
 import httpx
 
+from . import cache
 from .auth import _authenticate, get_client
 from .config import settings
 
@@ -199,7 +200,11 @@ async def _get_json(client: httpx.AsyncClient, url: str) -> dict:
 
 
 async def get_catalog_url(domain: str) -> str:
-    """Discover the service provider catalog URL from rootservices."""
+    """Discover the service provider catalog URL from rootservices (cached, see elm_mcp.cache)."""
+    return await cache.get_or_fetch("", f"catalog-url:{domain}", lambda: _load_catalog_url(domain))
+
+
+async def _load_catalog_url(domain: str) -> str:
     client = await get_client()
     root_url = f"{settings.elm_url}{DOMAIN_PATHS[domain]}"
     root = await _get_xml(client, root_url)
@@ -210,8 +215,13 @@ async def get_catalog_url(domain: str) -> str:
     raise ValueError(f"Cannot find service provider catalog for domain '{domain}'")
 
 
+async def _cached_service_providers(domain: str) -> list[dict]:
+    """The providers of a domain from the discovery cache (project name resolution of every tool)."""
+    return await cache.get_or_fetch("", f"providers:{domain}", lambda: list_service_providers(domain))
+
+
 async def list_service_providers(domain: str) -> list[dict]:
-    """List all service providers (projects) for a domain."""
+    """List all service providers (projects) for a domain (always read from the server)."""
     import re
 
     client = await get_client()
@@ -306,7 +316,7 @@ async def _find_query_base(domain: str, project_url: str) -> str:
 
 async def _resolve_project_url(domain: str, project_name: str) -> str:
     """Resolve project name to service provider URL."""
-    providers = await list_service_providers(domain)
+    providers = await _cached_service_providers(domain)
     for p in providers:
         if p["title"] and p["title"].lower() == project_name.lower():
             return p["url"]
@@ -320,9 +330,109 @@ MAX_QUERY_PAGES = 100
 
 
 class QueryResults(list):
-    """List of query members; ``truncated`` is True when more items exist than were returned."""
+    """List of query members; ``truncated`` is True when more items exist than were returned.
+
+    ``total`` (RM queries) is the server's count of matching items, when it reports one;
+    ``configuration`` (RM queries) is the stream sent as Configuration-Context, or None.
+    """
 
     truncated: bool = False
+    total: int | None = None
+    configuration: str | None = None
+
+
+# ---------------------------------------------------------------------------------------------
+# RM query (SPEC-rm-consulta): configuration context, oslc.prefix/oslc.select and RDF/JSON pages
+# ---------------------------------------------------------------------------------------------
+_RM_QUERY_PREFIXES = {
+    "dcterms": "http://purl.org/dc/terms/",
+    "oslc": "http://open-services.net/ns/core#",
+    "rdf": NS["rdf"],
+    "nav": "http://jazz.net/ns/rm/navigation#",
+    "jazz_rm": "http://jazz.net/ns/rm#",
+}
+_RM_QUERY_SELECT = "dcterms:title,dcterms:identifier,dcterms:modified,oslc:instanceShape,nav:parent"
+_RDF_JSON_OSLC = _RM_QUERY_PREFIXES["oslc"]
+_RDF_JSON_DCTERMS = _RM_QUERY_PREFIXES["dcterms"]
+_RDFS_MEMBER = "http://www.w3.org/2000/01/rdf-schema#member"
+_QUERY_RESULTS_RE = _re.compile(r"Query Results:\s*(\d+)")
+
+
+def _rdf_values(node: dict, predicate: str) -> list[str]:
+    values = node.get(predicate) if isinstance(node, dict) else None
+    return [str(v["value"]) for v in values if isinstance(v, dict) and "value" in v] if isinstance(values, list) else []
+
+
+def _rdf_first(node: dict, predicate: str) -> str | None:
+    values = _rdf_values(node, predicate)
+    return values[0] if values else None
+
+
+def _rdf_requirements(data: dict) -> list[dict]:
+    """One item per rm#Requirement subject of an RDF/JSON page; the container and ResponseInfo are skipped."""
+    items = []
+    for uri, node in data.items():
+        if _RM_REQUIREMENT_TYPE not in _rdf_values(node, f"{_RDF_NS}type"):
+            continue
+        item = {
+            "uri": uri,
+            "title": _rdf_first(node, f"{_RDF_JSON_DCTERMS}title"),
+            "identifier": _rdf_first(node, f"{_RDF_JSON_DCTERMS}identifier"),
+            "type": _rdf_first(node, f"{_RDF_JSON_OSLC}instanceShape"),
+            "modified": _rdf_first(node, f"{_RDF_JSON_DCTERMS}modified"),
+        }
+        folder = _rdf_first(node, f"{_RM_QUERY_PREFIXES['nav']}parent")
+        if folder:
+            item["folder"] = folder
+        items.append(item)
+    return items
+
+
+def _rdf_response_info(data: dict) -> dict:
+    """The ResponseInfo node (the subject typed oslc:ResponseInfo) of an RDF/JSON page, or {}."""
+    for node in data.values():
+        if f"{_RDF_JSON_OSLC}ResponseInfo" in _rdf_values(node, f"{_RDF_NS}type"):
+            return node
+    return {}
+
+
+def _rdf_next_page(data: dict) -> str | None:
+    return _rdf_first(_rdf_response_info(data), f"{_RDF_JSON_OSLC}nextPage")
+
+
+def _rdf_total(data: dict) -> int | None:
+    """oslc:totalCount of the ResponseInfo, else N of its title "Query Results: N"."""
+    info = _rdf_response_info(data)
+    count = _rdf_first(info, f"{_RDF_JSON_OSLC}totalCount")
+    if count is not None and count.strip().isdigit():
+        return int(count)
+    title = _QUERY_RESULTS_RE.search(_rdf_first(info, f"{_RDF_JSON_DCTERMS}title") or "")
+    return int(title.group(1)) if title else None
+
+
+async def _find_rm_configuration(project_url: str) -> str | None:
+    """The stream of an RM project: service provider -> oslc_config:component -> its oslc_config:configurations
+    -> first rdfs:member. None when the project exposes no component or the component lists no configuration.
+    Cached per project area (SPEC-cache-shape); the first stream listed is the one used.
+    """
+
+    async def load() -> str | None:
+        component = _re.search(
+            r"<oslc_config:component\s[^>]*rdf:resource=\"([^\"]+)\"", await _fetch_service_xml(project_url)
+        )
+        if component is None:
+            return None
+        component_xml = await _get_xml_text(_html.unescape(component.group(1)))
+        configurations = _re.search(r"<(?:\w+:)?configurations\s[^>]*rdf:resource=\"([^\"]+)\"", component_xml)
+        if configurations is None:
+            return None
+        member = _re.search(
+            r"<(?:\w+:)?member\s[^>]*rdf:resource=\"([^\"]+)\"",
+            await _get_xml_text(_html.unescape(configurations.group(1))),
+        )
+        return _html.unescape(member.group(1)) if member else None
+
+    return await cache.get_or_fetch(_project_area_id(project_url), f"rm-configuration:{project_url}", load)
 
 
 def _next_page_url(data: dict) -> str | None:
@@ -356,6 +466,11 @@ async def query_resources(
     result is a list with a ``truncated`` attribute (True when the query has more items). An expired session
     is re-authenticated once per page; a page that keeps failing raises a ValueError naming the gate and,
     after the first page, how many items had been collected.
+
+    RM queries (``domain == "rm"``) discover the project's configuration (stream) and send it as
+    ``Configuration-Context`` with ``oslc.prefix`` and a default ``oslc.select``; the RDF/JSON pages are
+    interpreted into one item per requirement (uri, title, identifier, type, modified, folder) and
+    ``total``/``configuration`` are set on the result.
     """
     if limit is not None and limit <= 0:
         raise ValueError(
@@ -365,9 +480,14 @@ async def query_resources(
     project_url = await _resolve_project_url(domain, project)
     query_base = await _find_query_base(domain, project_url)
     client = await get_client()
+    rm = domain == "rm"
+    configuration = await _find_rm_configuration(project_url) if rm else None
     params = {}
     if where:
         params["oslc.where"] = where
+    if rm:
+        params["oslc.prefix"] = ",".join(f"{name}=<{uri}>" for name, uri in _RM_QUERY_PREFIXES.items())
+        select = select or _RM_QUERY_SELECT
     if select:
         params["oslc.select"] = select
     params["oslc.pageSize"] = "50"
@@ -388,6 +508,8 @@ async def query_resources(
         url = query_base
 
     headers = {"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    if configuration:
+        headers["Configuration-Context"] = configuration
     resp = await _request(client, "GET", url, params=params, headers=headers)
     # Some domains (QM) don't support JSON — fallback to XML
     if resp.status_code == 406:
@@ -416,6 +538,7 @@ async def query_resources(
         return results
 
     results = QueryResults()
+    results.configuration = configuration
     seen: set[str] = set()
     visited: set[str] = {url}
     page_url = url
@@ -424,8 +547,20 @@ async def query_resources(
         check_response(resp, "query_resources", page_url)
         data = resp.json()
         new_on_page = 0
-        for item in _page_members(data):
-            key = item.get("rdf:about", item.get("rdf:resource")) if isinstance(item, dict) else None
+        if rm:
+            members = _rdf_requirements(data)
+            if results.total is None:
+                results.total = _rdf_total(data)
+        else:
+            members = _page_members(data)
+        for item in members:
+            key = (
+                item.get("uri")
+                if rm
+                else item.get("rdf:about", item.get("rdf:resource"))
+                if isinstance(item, dict)
+                else None
+            )
             if key is not None:
                 if key in seen:
                     continue
@@ -435,7 +570,7 @@ async def query_resources(
                 return results
             results.append(item)
             new_on_page += 1
-        next_url = _next_page_url(data)
+        next_url = _rdf_next_page(data) if rm else _next_page_url(data)
         if next_url is None:
             return results
         if len(results) >= cap:
@@ -650,6 +785,14 @@ def _project_area_id(project_url: str) -> str:
     return parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
 
 
+class WriteRejected(ValueError):
+    """A write the server refused; ``status_code`` tells a stale-shape validation error (400/409) from the rest."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
     """Raise a readable ValueError naming the gate for a refused write.
 
@@ -660,7 +803,7 @@ def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
     server_message = _server_message(resp)
     if server_message and _re.search(r"filed\s*against|categor", server_message, _re.IGNORECASE):
         message += " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
-    raise ValueError(message)
+    raise WriteRejected(message, resp.status_code)
 
 
 def _resolve_ccm_type(factories: list[dict], type_arg: str) -> dict:
@@ -1285,7 +1428,19 @@ async def _get_xml_text(url: str) -> str:
     return resp.text
 
 
+async def _cached_xml_text(url: str) -> str:
+    """_get_xml_text through the discovery cache (shapes and allowedValues documents, keyed by URL)."""
+    return await cache.get_or_fetch("", f"xml:{url}", lambda: _get_xml_text(url))
+
+
 async def _fetch_service_xml(project_url: str) -> str:
+    """The service provider XML of a project (cached by project area, see elm_mcp.cache)."""
+    return await cache.get_or_fetch(
+        _project_area_id(project_url), f"services:{project_url}", lambda: _load_service_xml(project_url)
+    )
+
+
+async def _load_service_xml(project_url: str) -> str:
     """GET the service provider XML. A services.xml URL is the document itself; otherwise try /services first."""
     if project_url.endswith("services.xml"):
         candidates = [project_url, project_url.replace("/services.xml", "/services")]
@@ -1356,7 +1511,7 @@ async def list_resource_shapes(domain: str, project: str) -> list[dict]:
     project_url = await _resolve_project_url(domain, project)
     if domain == "ccm":
         return await _list_ccm_creation_factories(project_url)
-    xml_text = await _get_xml_text(project_url)
+    xml_text = await _fetch_service_xml(project_url)
     resource_type = QUERY_RESOURCE_TYPE[domain]
 
     shapes: list[dict] = []
@@ -1365,7 +1520,7 @@ async def list_resource_shapes(domain: str, project: str) -> list[dict]:
         if rt is None or rt.group(1) != resource_type:
             continue
         for sh in _re.findall(r"<\w*:?resourceShape\s+[^>]*rdf:resource=\"([^\"]+)\"", block):
-            shape_xml = await _get_xml_text(sh)
+            shape_xml = await _cached_xml_text(sh)
             shapes.append(
                 {
                     "title": _shape_title(shape_xml),
@@ -1434,7 +1589,7 @@ async def list_shape_properties(shape_uri: str) -> list[dict]:
     (propertyDefinition), range_uri, allowed_values_uri, default_value.
     Raises ValueError when the shape references properties (oslc:property) but none could be extracted.
     """
-    xml_text = await _get_xml_text(shape_uri)
+    xml_text = await _cached_xml_text(shape_uri)
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
@@ -1454,7 +1609,7 @@ async def list_allowed_values(allowed_values_uri: str) -> list[dict]:
     rdf:Description with rdf:about + dcterms:title (URI + label).
     Returns [{"value_uri", "title"}] (title None when absent).
     """
-    xml_text = await _get_xml_text(allowed_values_uri)
+    xml_text = await _cached_xml_text(allowed_values_uri)
     titles: dict[str, str | None] = {}
     # rdf:Description blocks with rdf:about carry a title.
     for block in _re.findall(r"<\w*:?Description\b[^>]*>.*?</\w*:?Description>", xml_text, _re.DOTALL):
@@ -2142,6 +2297,16 @@ def _checked_id(name: str, value: str) -> str:
     return value
 
 
+async def _cached_json(project_area: str, url: str) -> dict:
+    """GET a workflow document as JSON through the discovery cache (keyed by project area and URL)."""
+
+    async def load() -> dict:
+        client = await get_client()
+        return (await fetch(client, "GET", url, "list_workflow", headers=_JSON_HEADERS)).json()
+
+    return await cache.get_or_fetch(project_area, f"json:{url}", load)
+
+
 async def _workflow_states(factory: dict) -> tuple[str, str, list[dict]]:
     """(area, workflow, states) of a type; states carry id, title and group. Does not read the actions.
 
@@ -2167,12 +2332,11 @@ async def _workflow_states(factory: dict) -> tuple[str, str, list[dict]]:
     area, workflow = matches[0].group(1), matches[0].group(2)
     state_ids = [unquote(m.group(3)) for m in matches if (m.group(1), m.group(2)) == (area, workflow)]
     state_ids = [sid for sid in state_ids if _ID_RE.fullmatch(sid)]
-    client = await get_client()
     states_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/states/{workflow}"
     states: list[dict] = []
     try:
-        states_resp = await fetch(client, "GET", states_url, "list_workflow", headers=_JSON_HEADERS)
-        for s in _page_members(states_resp.json()):
+        states_doc = await _cached_json(area, states_url)
+        for s in _page_members(states_doc):
             if not isinstance(s, dict):
                 continue
             about = s.get("rdf:about") or ""
@@ -2194,14 +2358,13 @@ async def _workflow_states(factory: dict) -> tuple[str, str, list[dict]]:
 async def _workflow_of(factory: dict) -> dict:
     """Workflow of a type (resolved factory): states (id, title, group) and action ids."""
     area, workflow, states = await _workflow_states(factory)
-    client = await get_client()
     actions_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/actions/{workflow}"
-    actions_resp = await fetch(client, "GET", actions_url, "list_workflow", headers=_JSON_HEADERS)
+    actions_doc = await _cached_json(area, actions_url)
     return {
         "type": factory["title"],
         "workflow": workflow,
         "states": states,
-        "actions": _action_ids(actions_resp.json()),
+        "actions": _action_ids(actions_doc),
     }
 
 

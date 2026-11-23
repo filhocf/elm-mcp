@@ -40,6 +40,8 @@ Client → FastMCP (stdio) → server.py → oslc.py → auth.py (cookies) → E
 - **SSL**: `verify=False` (internal certificates)
 - **Naming**: snake_case functions, PascalCase classes
 - **Queries**: `oslc.query_resources(..., limit=None)` follows `oslc:nextPage` (default 50, cap 1000, dedup by `rdf:about`) and returns a list with a `truncated` attribute; `list_workitems` wraps it as `{"items", "truncated"}`.
+- **Discovery cache** (`cache.py`): `cache.get_or_fetch(project_area, resource, loader)` keyed by (`ELM_URL`, project area, resource); TTL from `ELM_CACHE_TTL` read per call (default 300, `0` off), clock `time.monotonic()`; failed loads are not stored; `cache.refresh_scope(refresh)` serves `refresh=True`; `cache.invalidate(pa)` on a 400/409 creation error (`oslc.WriteRejected`). Never cache credentials, cookies or query results. tests/conftest.py clears it per test.
+- **RM queries**: `query_resources("rm", ...)` sends `Configuration-Context` (stream from `_find_rm_configuration`), `oslc.prefix` and `oslc.select`, and interprets RDF/JSON into one item per `rm#Requirement`; the result carries `total` and `configuration`.
 - **Work item types**: never hardcode a type map or organization type id; `create_workitem` resolves the type from the project's typed creation factories (`_resolve_ccm_type`).
 
 ## Domain-Specific Patterns (ELM 7.0.3)

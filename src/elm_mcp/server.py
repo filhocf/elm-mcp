@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import oslc, qm
+from . import cache, oslc, qm
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 mcp = MCPServer("elm-mcp", instructions="IBM ELM (DOORS Next, RTC, ETM) via OSLC")
 
 VALID_DOMAINS = ("rm", "ccm", "qm")
+
+# Creation errors that may come from a stale shape or value (validation): rediscover once and resend once.
+_STALE_SHAPE_STATUSES = (400, 409)
 
 _T = TypeVar("_T")
 
@@ -68,14 +71,23 @@ async def list_projects(domain: str) -> list[dict]:
 
 
 @read_tool
-async def search_requirements(project: str, query: str | None = None) -> dict:
+async def search_requirements(project: str, query: str | None = None, limit: int | None = None) -> dict:
     """Search requirements in a DOORS Next project. Query uses oslc.where syntax.
 
-    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
-    truncated=True means the query has more items than were returned.
+    The project's configuration (stream) is discovered and sent as Configuration-Context; the first
+    stream listed is used. Follows the server's pages until `limit` items (default and maximum 1000).
+    Returns {"items": [{"uri", "title", "identifier", "type", "modified", "folder"?}], "truncated": bool,
+    "total"?: int, "configuration"?: stream URI}; truncated=True means the query has more items than were
+    returned; total (matches reported by the server) and configuration (the stream sent) appear when known.
     """
-    results = await oslc.query_resources("rm", project, query, limit=oslc.MAX_QUERY_LIMIT)
-    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
+    results = await oslc.query_resources(
+        "rm", project, query, limit=limit if limit is not None else oslc.MAX_QUERY_LIMIT
+    )
+    result = {"items": list(results), "truncated": getattr(results, "truncated", False)}
+    for name in ("total", "configuration"):
+        if getattr(results, name, None) is not None:
+            result[name] = getattr(results, name)
+    return result
 
 
 @read_tool
@@ -364,6 +376,34 @@ async def create_workitem(
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
     project_url = await oslc._resolve_project_url("ccm", project)
+    try:
+        return await _create_workitem_once(
+            project, project_url, title, type, description, parent_id, owner, filed_against, custom_fields
+        )
+    except oslc.WriteRejected as exc:
+        if exc.status_code not in _STALE_SHAPE_STATUSES:
+            raise
+    # 400/409 may mean a stale shape or value: drop the project area's discovery, rediscover and resend ONCE
+    # (SPEC-cache-shape). A second refusal is reported as it came. Extension point for the local profile
+    # (SPEC-perfil-template): the discovery fallback plugs into cache.get_or_fetch(fallback=...).
+    cache.invalidate(oslc._project_area_id(project_url))
+    project_url = await oslc._resolve_project_url("ccm", project)
+    return await _create_workitem_once(
+        project, project_url, title, type, description, parent_id, owner, filed_against, custom_fields
+    )
+
+
+async def _create_workitem_once(
+    project: str,
+    project_url: str,
+    title: str,
+    type: str,
+    description: str | None,
+    parent_id: str | None,
+    owner: str | None,
+    filed_against: str | None,
+    custom_fields: dict | None,
+) -> dict:
     factory = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)
     type_id = factory["id"]
     project_area_id = oslc._project_area_id(project_url)
@@ -566,17 +606,19 @@ async def set_field(id: str, field: str, value: str) -> dict:
 
 
 @read_tool
-async def list_workflow(project: str, type: str) -> dict:
+async def list_workflow(project: str, type: str, refresh: bool = False) -> dict:
     """List the workflow of a work item type: states (id, title, group) and action ids.
 
     Args:
         project: Project name
         type: Type id, title or short alias (as in list_types / create_workitem)
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns {"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}.
     The action ids are the values accepted by transition_workitem.
     """
-    return await oslc.list_workflow(project, type)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_workflow(project, type)
 
 
 @tool
@@ -637,12 +679,13 @@ async def delete_requirement(uri: str) -> dict:
 
 
 @read_tool
-async def list_types(domain: str, project: str) -> list[dict]:
+async def list_types(domain: str, project: str, refresh: bool = False) -> list[dict]:
     """List resource types available in a project area.
 
     Args:
         domain: rm (DOORS Next) | ccm (RTC) | qm (ETM)
         project: Project name (as shown by list_projects)
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
     creation factory of a work item type:
@@ -652,11 +695,12 @@ async def list_types(domain: str, project: str) -> list[dict]:
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
         raise ToolError(f"Invalid domain '{domain}'. Must be one of: {VALID_DOMAINS}")
-    return await oslc.list_resource_shapes(domain, project)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_resource_shapes(domain, project)
 
 
 @read_tool
-async def list_fields(domain: str, project: str, type: str) -> dict:
+async def list_fields(domain: str, project: str, type: str, refresh: bool = False) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
     Args:
@@ -664,6 +708,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
         project: Project name
         type: Shape title (as shown by list_types); matched case-insensitively.
             For ccm: the type id or title from list_types, or a short alias (task, story...).
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns {"type", "shape_uri", "required":[...], "optional":[...]}; each field has
     name, title, occurs, read_only, property_uri, range_uri and allowed_values.
@@ -671,7 +716,8 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
         raise ToolError(f"Invalid domain '{domain}'. Must be one of: {VALID_DOMAINS}")
-    return await oslc.list_fields(domain, project, type)
+    with cache.refresh_scope(refresh):
+        return await oslc.list_fields(domain, project, type)
 
 
 @read_tool
