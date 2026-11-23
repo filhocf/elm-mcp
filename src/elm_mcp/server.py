@@ -68,9 +68,14 @@ async def list_projects(domain: str) -> list[dict]:
 
 
 @read_tool
-async def search_requirements(project: str, query: str | None = None) -> list[dict]:
-    """Search requirements in a DOORS Next project. Query uses oslc.where syntax."""
-    return await oslc.query_resources("rm", project, query)
+async def search_requirements(project: str, query: str | None = None) -> dict:
+    """Search requirements in a DOORS Next project. Query uses oslc.where syntax.
+
+    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
+    truncated=True means the query has more items than were returned.
+    """
+    results = await oslc.query_resources("rm", project, query, limit=oslc.MAX_QUERY_LIMIT)
+    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool
@@ -96,7 +101,9 @@ async def list_workitems(
         state: state title (oslc_cm:status, e.g. "In Progress")
         owner: user id (e.g. "jdoe") or user URI (dcterms:contributor)
         planned_for: iteration URI (rtc_cm:plannedFor, see list_iterations)
-    A filter value with a double quote, angle bracket or backslash is refused.
+    A filter value with a double quote, angle bracket, backslash or non-printable character is refused.
+    The raw `query` is combined with the filters only with `and`: `or` is not supported (oslc.where has
+    no disjunction), so a `query` containing `or` is not guaranteed to work.
 
     Follows the server's pages until `limit` items (default 50, maximum 1000).
     Returns {"items": [...], "truncated": bool}; truncated=True means the query has more items.
@@ -133,9 +140,14 @@ async def get_workitem(id: str) -> dict:
 
 
 @read_tool
-async def search_testcases(project: str, query: str | None = None) -> list[dict]:
-    """Search test cases in an ETM project. Query uses oslc.where syntax."""
-    return await oslc.query_resources("qm", project, query)
+async def search_testcases(project: str, query: str | None = None) -> dict:
+    """Search test cases in an ETM project. Query uses oslc.where syntax.
+
+    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
+    truncated=True means the query has more items than were returned.
+    """
+    results = await oslc.query_resources("qm", project, query, limit=oslc.MAX_QUERY_LIMIT)
+    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool
@@ -155,7 +167,9 @@ async def list_iterations(project: str) -> list[dict]:
         iter_uri = r.get("rdf:resource")
         if not iter_uri:
             continue
-        detail = await client.get(iter_uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+        detail = await client.get(
+            oslc.assert_same_origin(iter_uri), headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+        )
         if detail.status_code != 200:
             continue
         d = detail.json()
@@ -191,6 +205,7 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
         return {"error": "Provide either 'plan' (iteration name) or 'item_ids' (list of IB IDs)"}
 
     iteration_info = None
+    truncated = False
 
     if item_ids:
         # Direct mode: expand given IB IDs
@@ -209,8 +224,9 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
 
         # Get all IBs (type=story) and filter by plannedFor
         all_items = await oslc.query_resources(
-            "ccm", project, None, select="dcterms:title,dcterms:identifier,dcterms:type"
+            "ccm", project, None, select="dcterms:title,dcterms:identifier,dcterms:type", limit=oslc.MAX_QUERY_LIMIT
         )
+        truncated = getattr(all_items, "truncated", False)
         ib_ids_to_fetch = []
         for item in all_items:
             item_type = item.get("dcterms:type", "")
@@ -263,7 +279,7 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
             }
         )
 
-    result = {"items_count": len(result_items), "items": result_items}
+    result = {"items_count": len(result_items), "items": result_items, "truncated": truncated}
     if iteration_info:
         result["iteration"] = iteration_info["title"]
         result["start_date"] = iteration_info["start_date"]
@@ -295,7 +311,8 @@ async def create_workitem(
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
     project_url = await oslc._resolve_project_url("ccm", project)
-    type_id = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)["id"]
+    factory = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)
+    type_id = factory["id"]
     project_area_id = oslc._project_area_id(project_url)
     payload: dict = {
         "dcterms:title": title,
@@ -319,7 +336,7 @@ async def create_workitem(
     # Inject custom fields (project-specific customizations)
     if custom_fields:
         payload.update(custom_fields)
-    return await oslc.create_resource("ccm", project, payload, wi_type=type)
+    return await oslc.create_resource("ccm", project, payload, factory=factory, project_url=project_url)
 
 
 @tool

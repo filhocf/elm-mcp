@@ -9,21 +9,23 @@ import respx
 from elm_mcp import auth, config
 from elm_mcp.config import settings
 
+from .conftest import RealNetworkBlocked
+
 
 async def test_unmocked_request_fails_fast_with_a_clear_error():
     async with httpx.AsyncClient() as client:
-        with pytest.raises(RuntimeError, match="real network blocked"):
+        with pytest.raises(RealNetworkBlocked, match="real network blocked"):
             await client.get("https://elm.example.com/ccm/rootservices")
 
 
 def test_unmocked_sync_request_fails_fast_with_a_clear_error():
-    with httpx.Client() as client, pytest.raises(RuntimeError, match="real network blocked"):
+    with httpx.Client() as client, pytest.raises(RealNetworkBlocked, match="real network blocked"):
         client.get("https://elm.example.com/ccm/rootservices")
 
 
 async def test_login_without_a_mock_does_not_reach_the_server():
     """The exact accident of W2 part 1: get_client() with no mock must not log in anywhere."""
-    with pytest.raises(RuntimeError, match="real network blocked"):
+    with pytest.raises(RealNetworkBlocked, match="real network blocked"):
         await auth.get_client()
     await auth.close_client()
 

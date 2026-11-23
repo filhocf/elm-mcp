@@ -15,7 +15,8 @@ create tasks and stories, build parent/child hierarchy, assign owners, plan them
 iterations, set custom fields, and move them through their workflow. Covers:
 `list_workitems`, `get_workitem`, `create_workitem`, `update_workitem`,
 `add_child_workitem`, `transition_workitem`, `list_iterations`, `get_plan_items`,
-`inspect_workitem`.
+`inspect_workitem`, and the collaboration tools `add_comment`, `list_comments`,
+`link_workitems`, `unlink_workitems`, `set_field`, `list_workflow`.
 
 Category, iteration and custom `rtc_ext:*` attributes vary per project area and are **not**
 hardcoded — discover them first with the **`elm-discovery`** skill.
@@ -39,9 +40,15 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
 
 ### Read
 
-1. **Query.** `list_workitems(project, query=None)` runs an OSLC query; omit `query` to list,
-   pass one to filter by title/type/state/iteration (see `docs/USAGE.md`). Returns
-   id/title/type/status/owner inline.
+1. **Query.** `list_workitems(project, query=None, limit=None, type=None, state=None,
+   owner=None, planned_for=None)` runs an OSLC query. The filters (`type` title, `state`
+   title, `owner` user id or URI, `planned_for` iteration URI) are sent to the server in
+   `oslc.where` and combined with `query` only with `and` (no `or`); a value with a quote,
+   angle bracket, backslash or non-printable character is refused. It follows the server's
+   pages until `limit` items (default 50, max 1000; `limit` must be positive) and returns
+   `{"items": [{id, title, type, status, owner}], "truncated": bool}`; `truncated=true` means
+   there are more items. `search_requirements` and `search_testcases` return the same shape
+   (up to 1000 items), and `get_plan_items` adds a `truncated` key.
 2. **Read one.** `get_workitem(id)` fetches a single work item by ID.
 3. **Hierarchy view.** `get_plan_items(project, plan=None, item_ids=None)` returns backlog
    items with their child tasks expanded in one call. Select by `plan` (iteration-title
@@ -56,12 +63,25 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    (category, iteration, custom attributes) from a real item.
 6. **Create.** `create_workitem(project, title, type="task", description=None,
    parent_id=None, owner=None, filed_against=None, custom_fields=None)`.
-   `type` is `"task"` or `"story"` only. Category and iteration are auto-discovered when
+   `type` is any work item type of the project (id, title or alias from `list_types`; an ambiguous
+   one is refused listing the ids). Category and iteration are auto-discovered when
    omitted; pass `filed_against` / `custom_fields` explicitly for project-specific values.
    Pass `parent_id` to create it already linked under a parent.
 7. **Child item.** `add_child_workitem(parent_id, title, type="task", description=None,
    owner=None, project=...)` creates a work item linked as a child of `parent_id` — use this
    to build a backlog hierarchy under a story/epic.
+
+### Collaboration
+
+- `list_comments(id)` -> `[{"id", "author", "created", "text"}]`; `add_comment(id, text)` sends
+  the text HTML-escaped (line breaks as `<br/>`), POSTs once (never resent) and confirms the new
+  comment by its id.
+- `link_workitems(source, target, link_type)` / `unlink_workitems(...)`: `link_type` is `parent`,
+  `blocks`, `depends_on`, `related`, `duplicate_of` or `resolves`; an item cannot be linked to itself.
+- `set_field(id, field, value)`: `field` is `prefix:name` (or a shape property name); it must be in
+  the item's shape and not read-only (otherwise use `list_fields`); the value is converted to the
+  field's range (integer, boolean, decimal) and an enumerated field takes the literal title or id.
+- `list_workflow(project, type)`: states (`id`, `title`, `group`) and action ids for `transition_workitem`.
 
 ### Update & transition
 
@@ -126,8 +146,10 @@ transition_workitem(id="100300", action="start")  # only if a unique action id c
 
 ## Notes / Gotchas
 
-- **`type` is only `"task"` or `"story"`** on `create_workitem` / `add_child_workitem` today.
-  Other kinds (defect, risk, impediment, …) are on the roadmap, not yet supported.
+- **`type`** on `create_workitem`: any type shown by `list_types` (precedence: exact id, then
+  the last segment of the id, then title; two matches at the same level are an error).
+- **Only URLs on the configured `ELM_URL` are followed** (next pages, workflow states, comments);
+  anything else is refused.
 - **State is a workflow action, not a field.** Use `transition_workitem(action=...)` with the id
   (or id suffix) of a workflow action; do not try to set state via `update_workitem`.
   The valid actions depend on the item's workflow and current state; a call with an

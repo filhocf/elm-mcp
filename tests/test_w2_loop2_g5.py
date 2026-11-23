@@ -258,8 +258,8 @@ def _factory(type_id: str, title: str) -> dict:
 
 
 def test_two_types_with_the_same_title_are_ambiguous_and_listed():
-    factories = [_factory("a.risk", "Risk"), _factory("b.hazard", "Risk")]
-    with pytest.raises(ValueError, match=r"a\.risk.*b\.hazard|b\.hazard.*a\.risk"):
+    factories = [_factory("a.x", "Risk"), _factory("b.y", "Risk")]
+    with pytest.raises(ValueError, match=r"a\.x.*b\.y"):
         oslc._resolve_ccm_type(factories, "risk")
 
 

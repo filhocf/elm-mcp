@@ -28,6 +28,14 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 - `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
   `oslc.where` (combined with `query` by `and`); a filter value with a quote, angle bracket or backslash is refused.
 - `list_workitems` now returns `{"items": [...], "truncated": bool}` instead of a list, follows `oslc:nextPage` up to `limit` items (default 50, max 1000) and re-authenticates once per page.
+- **Breaking (W2, deliberate):** `search_requirements` and `search_testcases` now return `{"items": [...], "truncated": bool}` instead of a list (same shape as `list_workitems`), follow the pages up to 1000 items and no longer cut silently at 50. `get_plan_items` also queries up to 1000 items and gains a `truncated` key.
+- Pagination (`oslc:nextPage`) stops on a repeated page URL, on a page without any new item and after 100 pages (`truncated=true`); `limit` of zero or less is an error instead of silently using the default.
+- Security: every URL followed from a server response (next pages, workflow states, comment and iteration references, shapes) must be on the same scheme, host and port as `ELM_URL`; otherwise the call fails. The same applies to the URI given to `get_requirement`.
+- `add_comment` sends the text HTML-escaped (line breaks as `<br/>`) and confirms the comment by its new id (the normalized text is only a supporting check); the POST is still sent once.
+- Work item type resolution has an explicit precedence (exact id, then the last segment of the id, then title); two matches at the same level are an error listing the ids.
+- `set_field` refuses a malformed field name (`prefix:name` only), a read-only field and a field outside the item's shape (use `list_fields`), and converts the value to the field's range (integer, boolean, decimal).
+- `create_workitem` discovers the project and its factories once instead of twice.
+- `link_workitems` / `unlink_workitems` refuse a link of an item to itself; list_workitems filters also refuse non-printable characters.
 - `create_workitem` accepts any work item type the project exposes (id, title or short alias such as `task`/`story`); an unknown type is refused listing the available ones.
 
 ### Fixed

@@ -3,7 +3,9 @@
 Safety net (autouse, applies to EVERY test):
 - ``elm_mcp.config.settings`` points at a fictitious tenant (https://elm.example.com, jdoe) and the
   ``~/.elm_creds.json`` fallback is unreachable, so a test can never log in with real credentials.
-- Any real network connection raises ``RuntimeError("real network blocked ...")``. respx routers
+- Any real network connection raises ``RealNetworkBlocked("real network blocked ...")``, a
+  ``BaseException`` (not an ``Exception``): production code with ``except Exception`` cannot swallow it
+  and turn an accidental real call into a silent pass. respx routers
   (``@respx.mock``, ``w2_router``, ...) keep working: respx patches the same httpcore layer on top of
   this guard, and only calls it for pass-through routes.
 
@@ -12,6 +14,7 @@ registered on it (unmatched requests raise), so a W2 test can never reach a real
 """
 
 import os
+import shutil
 import socket
 import tempfile
 
@@ -32,10 +35,20 @@ FAKE_URL = "https://elm.example.com"
 FAKE_USER = "jdoe"
 FAKE_PASSWORD = "not-a-real-password"
 
+
+class RealNetworkBlocked(BaseException):
+    """A test tried to reach a real server without a respx route."""
+
+
 _BLOCKED = (
     "real network blocked by tests/conftest.py: this request did not match any respx route. "
     "Mock it (respx.mock / w2_router); tests must never reach a real server."
 )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove the temporary HOME created at import time."""
+    shutil.rmtree(_EMPTY_HOME, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -56,16 +69,16 @@ def _block_real_network(monkeypatch):
     # The names must stay ``handle_async_request``/``handle_request``: respx only wraps a patched
     # method whose ``__name__`` is the original one (otherwise its mock would be silently skipped).
     async def handle_async_request(self, request):
-        raise RuntimeError(_BLOCKED)
+        raise RealNetworkBlocked(_BLOCKED)
 
     def handle_request(self, request):
-        raise RuntimeError(_BLOCKED)
+        raise RealNetworkBlocked(_BLOCKED)
 
     real_connect = socket.socket.connect
 
     def _guarded_connect(self, address):
         if self.family in (socket.AF_INET, socket.AF_INET6):
-            raise RuntimeError(_BLOCKED)
+            raise RealNetworkBlocked(_BLOCKED)
         return real_connect(self, address)
 
     monkeypatch.setattr(httpcore.AsyncConnectionPool, "handle_async_request", handle_async_request)

@@ -3,6 +3,7 @@
 import html as _html
 import io
 import logging
+import math
 import re as _re
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
@@ -126,8 +127,40 @@ def _needs_reauth(resp: httpx.Response) -> bool:
     )
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    try:
+        port = parsed.port or _DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        port = None
+    return scheme, (parsed.hostname or "").lower(), port
+
+
+def assert_same_origin(url: str) -> str:
+    """Return ``url`` if it is on the configured ELM server (scheme, host and port), else raise ValueError.
+
+    Every URL followed from a server response (nextPage, workflow states, comment references,
+    iterations, shapes...) goes through here (via _request), so a hostile or misconfigured response
+    cannot make the client, which carries the session cookies, call another host.
+    """
+    if not isinstance(url, str) or not _origin(url)[1] or _origin(url) != _origin(settings.elm_url):
+        raise ValueError(
+            f"Refusing to follow '{url}': it is outside the configured ELM server ({settings.elm_url}). "
+            "URLs found in server responses must be on the same scheme, host and port."
+        )
+    return url
+
+
 async def _request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:
-    """Send a request, re-authenticating ONCE when the session looks expired (see _needs_reauth)."""
+    """Send a request, re-authenticating ONCE when the session looks expired (see _needs_reauth).
+
+    Only URLs on the configured ELM server are requested (see assert_same_origin).
+    """
+    assert_same_origin(url)
     send = getattr(client, method.lower())
     resp = await send(url, **kwargs)
     if _needs_reauth(resp):
@@ -279,6 +312,7 @@ async def _resolve_project_url(domain: str, project_name: str) -> str:
 
 DEFAULT_QUERY_LIMIT = 50
 MAX_QUERY_LIMIT = 1000
+MAX_QUERY_PAGES = 100
 
 
 class QueryResults(list):
@@ -313,12 +347,17 @@ async def query_resources(
 ) -> QueryResults:
     """Execute an OSLC query on a project, following oslc:nextPage until ``limit`` unique items.
 
-    ``limit`` defaults to 50 and is capped at 1000. The result is a list with a ``truncated``
-    attribute (True when the query has more items). An expired session is re-authenticated once
-    per page; a page that keeps failing raises a ValueError naming the gate and, after the
-    first page, how many items had been collected.
+    ``limit`` defaults to 50 and is capped at 1000; zero or a negative value is an error. The walk also
+    stops (truncated) on a repeated next-page URL, on a page without any new item and after 100 pages. The
+    result is a list with a ``truncated`` attribute (True when the query has more items). An expired session
+    is re-authenticated once per page; a page that keeps failing raises a ValueError naming the gate and,
+    after the first page, how many items had been collected.
     """
-    cap = min(limit if limit and limit > 0 else DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
+    if limit is not None and limit <= 0:
+        raise ValueError(
+            f"limit must be a positive number (got {limit}); omit it for the default of {DEFAULT_QUERY_LIMIT}."
+        )
+    cap = min(limit if limit else DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
     project_url = await _resolve_project_url(domain, project)
     query_base = await _find_query_base(domain, project_url)
     client = await get_client()
@@ -374,10 +413,13 @@ async def query_resources(
 
     results = QueryResults()
     seen: set[str] = set()
+    visited: set[str] = {url}
     page_url = url
+    pages = 1
     while True:
         check_response(resp, "query_resources", page_url)
         data = resp.json()
+        new_on_page = 0
         for item in _page_members(data):
             key = item.get("rdf:about", item.get("rdf:resource")) if isinstance(item, dict) else None
             if key is not None:
@@ -388,13 +430,24 @@ async def query_resources(
                 results.truncated = True
                 return results
             results.append(item)
+            new_on_page += 1
         next_url = _next_page_url(data)
         if next_url is None:
             return results
         if len(results) >= cap:
             results.truncated = True
             return results
+        # Guards against a server that never ends: a repeated page URL, a page with nothing new
+        # and a ceiling on the number of pages all stop the walk (the result is then truncated).
+        if next_url in visited or new_on_page == 0 or pages >= MAX_QUERY_PAGES:
+            logger.warning(
+                "query_resources: stopped at page %d (repeated next page, no new item or page ceiling)", pages
+            )
+            results.truncated = True
+            return results
+        visited.add(next_url)
         page_url = next_url
+        pages += 1
         try:
             resp = await _request(client, "GET", page_url, headers=headers)
             check_response(resp, "query_resources", page_url)
@@ -531,7 +584,9 @@ async def _find_current_iteration(project_url: str) -> str | None:
             iter_uri = m.get("rdf:resource")
             if not iter_uri:
                 continue
-            detail = await client.get(iter_uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+            detail = await client.get(
+                assert_same_origin(iter_uri), headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+            )
             if detail.status_code != 200:
                 continue
             d = detail.json()
@@ -605,36 +660,56 @@ def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
 
 
 def _resolve_ccm_type(factories: list[dict], type_arg: str) -> dict:
-    """Pick the typed factory for a type id, title (case-insensitive) or short alias.
+    """Pick the typed factory for a type id, short alias or title.
 
     Everything comes from the project's discovery: the alias is the last segment of the type id
-    (``task``, ``story``, ``risk``...), so no type map is kept in code.
+    (``task``, ``story``, ``risk``...), so no type map is kept in code. Precedence, first level that
+    matches wins: exact id > alias (last id segment, case-insensitive) > title (case-insensitive).
+    More than one match inside the winning level is ambiguous: ValueError listing the ids.
     """
     wanted = type_arg.strip()
     lowered = wanted.lower()
-    match = next((f for f in factories if f["id"] == wanted), None)
-    if match is None:
-        match = next((f for f in factories if (f["title"] or "").lower() == lowered), None)
-    if match is None:
-        match = next((f for f in factories if f["id"].rsplit(".", 1)[-1].lower() == lowered), None)
-    if match is None:
-        available = ", ".join(f"{f['id']} ({f['title']})" for f in factories)
-        raise ValueError(f"Type '{type_arg}' not found in this project. Available types: {available}")
-    return match
+    levels = (
+        ("id", [f for f in factories if f["id"] == wanted]),
+        ("alias", [f for f in factories if f["id"].rsplit(".", 1)[-1].lower() == lowered]),
+        ("title", [f for f in factories if (f["title"] or "").strip().lower() == lowered]),
+    )
+    for kind, matches in levels:
+        if len(matches) > 1:
+            ids = ", ".join(f["id"] for f in matches)
+            raise ValueError(
+                f"Type '{type_arg}' is ambiguous (several types share this {kind}): {ids}. Use the type id."
+            )
+        if matches:
+            return matches[0]
+    available = ", ".join(f"{f['id']} ({f['title']})" for f in factories)
+    raise ValueError(f"Type '{type_arg}' not found in this project. Available types: {available}")
 
 
-async def create_resource(domain: str, project: str, payload: dict, wi_type: str | None = None) -> dict:
+async def create_resource(
+    domain: str,
+    project: str,
+    payload: dict,
+    wi_type: str | None = None,
+    *,
+    factory: dict | None = None,
+    project_url: str | None = None,
+) -> dict:
     """POST a new resource (RDF/XML) to the creation factory.
 
     With wi_type, the POST goes to the factory of that type (id, title or alias); the
-    generic /workitems factory is only used when no type is given.
+    generic /workitems factory is only used when no type is given. A caller that already
+    resolved the type passes ``factory`` (and ``project_url``) to skip a second discovery.
     """
     if domain != "ccm":
         raise NotImplementedError(f"create_resource only supports 'ccm' domain, got '{domain}'")
-    project_url = await _resolve_project_url(domain, project)
+    if project_url is None:
+        project_url = await _resolve_project_url(domain, project)
     generic_url = f"{settings.elm_url}/ccm/oslc/contexts/{_project_area_id(project_url)}/workitems"
     creation_url = generic_url
-    if wi_type:
+    if factory is not None:
+        creation_url = factory["factory_uri"]
+    elif wi_type:
         factories = await _list_ccm_creation_factories(project_url)
         creation_url = _resolve_ccm_type(factories, wi_type)["factory_uri"]
     client = await get_client()
@@ -758,7 +833,9 @@ def _action_ids(data: dict) -> list[str]:
 async def _state_titles(client: httpx.AsyncClient, states_url: str) -> dict[str, str]:
     """Map state id -> dcterms:title from the workflow states listing (best effort)."""
     try:
-        resp = await client.get(states_url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+        resp = await client.get(
+            assert_same_origin(states_url), headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+        )
         if resp.status_code != 200:
             return {}
         members = resp.json().get("oslc:results", [])
@@ -1664,11 +1741,29 @@ async def list_comments(id: str) -> list[dict]:
     return [await _comment_entry(client, m) for m in members]
 
 
+def _comment_html(text: str) -> str:
+    """The comment body the server stores: HTML-escaped, line breaks as <br/>."""
+    return _html.escape(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
+
+
+def _plain(value: str | None) -> str:
+    """Comparable plain text of a comment (markup stripped, entities decoded, whitespace collapsed)."""
+    value = _re.sub(r"<br\s*/?>|</(?:div|p)>", " ", value or "", flags=_re.IGNORECASE)
+    value = _re.sub(r"<[^>]+>", "", value)
+    return " ".join(_html.unescape(value).split())
+
+
 async def add_comment(id: str, text: str) -> dict:
-    """POST a comment (OSLC CM 1.0) and confirm it through list_comments. The POST is never repeated."""
+    """POST a comment (OSLC CM 1.0) and confirm it through list_comments. The POST is never repeated.
+
+    The text is sent HTML-escaped (the server stores comments as HTML) with line breaks as <br/>.
+    Confirmation is by the NEW comment id (ids absent before the POST); the normalized text is only
+    a supporting check when the server's answer does not give the id of the created comment.
+    """
     if not text or not text.strip():
         raise ValueError("Comment text must not be empty.")
-    before = {c["id"] for c in await list_comments(id)}
+    before_list = await list_comments(id)
+    before = {c["id"] for c in before_list if c["id"] is not None}
     client = await get_client()
     url = comments_uri(id)
     # CM 1.0 on purpose: with OSLC-Core-Version 2.0 this endpoint answers 405.
@@ -1677,7 +1772,7 @@ async def add_comment(id: str, text: str) -> dict:
         "POST",
         url,
         "add_comment",
-        json={"dc:description": text},
+        json={"dc:description": _comment_html(text)},
         headers={"Content-Type": _COMMENT_CONTENT_TYPE, "Accept": "application/json"},
     )
     try:
@@ -1687,9 +1782,19 @@ async def add_comment(id: str, text: str) -> dict:
     created_id = _last_segment(created_uri) if created_uri else None
 
     after = await list_comments(id)
-    new = [c for c in after if c["id"] not in before and c["text"] == text]
+    wanted = _plain(text)
+    fresh = [c for c in after if c["id"] is not None and c["id"] not in before]
+    # Comments the server gives no id for cannot be told apart by id: the ones past the old count count as new.
+    anonymous = [c for c in after[len(before_list) :] if c["id"] is None]
+    new: list[dict] = []
     if created_id is not None:
-        new = [c for c in new if c["id"] == created_id] or new
+        new = [c for c in fresh if c["id"] == created_id]
+    if not new:
+        new = [c for c in fresh if _plain(c["text"]) == wanted]
+    if not new and created_id is None and len(fresh) == 1:
+        new = fresh
+    if not new:
+        new = [c for c in anonymous if _plain(c["text"]) == wanted]
     if not new:
         raise ValueError(
             f"The server answered HTTP {resp.status_code} to the comment POST on work item {id}, but the "
@@ -1720,6 +1825,8 @@ async def _change_link(source: str, target: str, link_type: str, *, add: bool) -
     target_key = str(target).strip()
     if not target_key:
         raise ValueError("Target work item id must not be empty.")
+    if target_key == str(source).strip():
+        raise ValueError(f"Work item {target_key} cannot be linked to itself.")
     client = await get_client()
     uri = workitem_uri(source)
     item, etag = await _read_item(client, uri, operation)
@@ -1780,16 +1887,50 @@ def _match_literal(value: str, allowed: list[dict]) -> dict | None:
     return next((a for a in allowed if (a["title"] or "").strip().lower() == lowered), None)
 
 
+_FIELD_QNAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*:[\w.-]+$")
+_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*$")
+_INTEGER_RANGES = {"integer", "int", "long", "short", "byte", "nonnegativeinteger", "positiveinteger"}
+_DECIMAL_RANGES = {"decimal", "double", "float"}
+
+
+def _convert_to_range(key: str, value: str, range_uri: str | None) -> object:
+    """Convert ``value`` to the XSD range the shape declares (integer, boolean, decimal); a string otherwise."""
+    kind = _last_segment(range_uri).lower() if range_uri else ""
+    text = str(value).strip()
+    try:
+        if kind in _INTEGER_RANGES:
+            return int(text)
+        if kind == "boolean":
+            if text.lower() not in ("true", "false"):
+                raise ValueError(text)
+            return text.lower() == "true"
+        if kind in _DECIMAL_RANGES:
+            number = float(text)
+            if not math.isfinite(number):
+                raise ValueError(text)
+            return number
+    except ValueError:
+        raise ValueError(f"Value '{value}' is not a valid {kind} for {key}.") from None
+    return value
+
+
 async def set_field(id: str, field: str, value: str) -> dict:
     """Write one field with a partial PUT; an enumerated field takes the literal title or id.
 
     ``field`` is the item's prefixed property name (rtc_cm:storyPoints) or the shape's property
-    name (storyPoints). The value of an enumerated property is validated against its allowedValues
-    (shape of the allowedValues document: to be confirmed in live acceptance).
+    name (storyPoints); anything else (commas, braces, spaces) is refused, as is a field that is not
+    in the item's shape or that the shape marks read-only. The value is converted to the property's
+    range (integer, boolean, decimal; a string otherwise). The value of an enumerated property is
+    validated against its allowedValues (shape of the allowedValues document: to be confirmed in
+    live acceptance).
     """
     field = (field or "").strip()
     if not field:
         raise ValueError("Field must not be empty.")
+    if not (_FIELD_QNAME_RE.match(field) if ":" in field else _FIELD_NAME_RE.match(field)):
+        raise ValueError(
+            f"Invalid field name {field!r}: use prefix:name (e.g. rtc_cm:storyPoints) or a shape property name."
+        )
     client = await get_client()
     uri = workitem_uri(id)
     item, etag = await _read_item(client, uri, "set_field")
@@ -1797,26 +1938,35 @@ async def set_field(id: str, field: str, value: str) -> dict:
     if isinstance(item.get("prefixes"), dict):
         prefixes.update(item["prefixes"])
 
-    props: list[dict] = []
     shape = _resource_uri(item.get("oslc:instanceShape"))
-    if shape:
-        props = await list_shape_properties(shape)
+    if not shape:
+        raise ValueError(
+            f"Work item {id} has no instance shape: field '{field}' cannot be validated (use list_fields)."
+        )
+    props = await list_shape_properties(shape)
     expanded = _expand(field, prefixes)
     prop = next((p for p in props if expanded and p["property_uri"] == expanded), None)
     if prop is None:
         prop = next((p for p in props if p["name"] == field), None)
+    if prop is None:
+        names = sorted(p["name"] for p in props if p["name"])
+        raise ValueError(
+            f"Unknown field '{field}': it is not in this work item's shape. Use list_fields to see the valid fields "
+            f"({names})."
+        )
     key = field
-    if prop is not None and ":" not in field:
+    if ":" not in field:
         key = _compact(prop["property_uri"] or "", prefixes) or ""
         if not key:
             raise ValueError(f"Cannot map shape property '{field}' ({prop['property_uri']}) to a prefixed name.")
-    elif prop is None and ":" not in field:
-        names = sorted(p["name"] for p in props if p["name"])
-        raise ValueError(f"Field '{field}' not found in the work item's shape. Available: {names}")
+    if prop["read_only"]:
+        raise ValueError(f"Field '{key}' is read-only in this work item's shape and cannot be written.")
 
     warnings: list[str] = []
     written: object = value
-    if prop is not None and prop["allowed_values_uri"]:
+    if not prop["allowed_values_uri"]:
+        written = _convert_to_range(key, value, prop["range_uri"])
+    else:
         allowed = await list_allowed_values(prop["allowed_values_uri"])
         literal = _match_literal(value, allowed)
         if literal is None:
@@ -1895,8 +2045,10 @@ def _safe_filter_value(name: str, value: str) -> str:
     value = str(value).strip()
     if not value:
         raise ValueError(f"Filter '{name}' must not be empty.")
-    if any(c in value for c in '"<>\\') or any(c.isspace() and c != " " for c in value):
-        raise ValueError(f"Filter '{name}' has a forbidden character (quote, angle bracket or backslash): {value!r}")
+    if any(c in value for c in '"<>\\') or not value.isprintable():
+        raise ValueError(
+            f"Filter '{name}' has a forbidden character (quote, angle bracket, backslash or non-printable): {value!r}"
+        )
     return value
 
 
