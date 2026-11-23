@@ -604,25 +604,22 @@ def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
     raise ValueError(message)
 
 
-# CCM type aliases accepted by create_workitem/list_fields. Any other type must come from list_types.
-CCM_TYPE_IDS = {
-    "task": "task",
-    "story": "com.ibm.team.apt.workItemType.story",
-}
-
-
 def _resolve_ccm_type(factories: list[dict], type_arg: str) -> dict:
-    """Pick the typed factory for a type id, title (case-insensitive) or alias (task/story)."""
+    """Pick the typed factory for a type id, title (case-insensitive) or short alias.
+
+    Everything comes from the project's discovery: the alias is the last segment of the type id
+    (``task``, ``story``, ``risk``...), so no type map is kept in code.
+    """
     wanted = type_arg.strip()
+    lowered = wanted.lower()
     match = next((f for f in factories if f["id"] == wanted), None)
     if match is None:
-        match = next((f for f in factories if (f["title"] or "").lower() == wanted.lower()), None)
+        match = next((f for f in factories if (f["title"] or "").lower() == lowered), None)
     if match is None:
-        alias = CCM_TYPE_IDS.get(wanted.lower())
-        match = next((f for f in factories if alias and f["id"] == alias), None)
+        match = next((f for f in factories if f["id"].rsplit(".", 1)[-1].lower() == lowered), None)
     if match is None:
-        available = [f"{f['id']} ({f['title']})" for f in factories]
-        raise ValueError(f"Type '{type_arg}' not found. Available: {available}")
+        available = ", ".join(f"{f['id']} ({f['title']})" for f in factories)
+        raise ValueError(f"Type '{type_arg}' not found in this project. Available types: {available}")
     return match
 
 
@@ -1396,7 +1393,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
     Resolves the shape by its title (case-insensitive equality) among the shapes
-    of the project; for ccm the type is the id, title or alias (task/story) of a typed
+    of the project; for ccm the type is the id, title or short alias (task, story...) of a typed
     factory. An unknown type raises ValueError (ToolError at the boundary).
     Returns {"type","shape_uri","required":[...],"optional":[...]}; each field
     carries allowed_values (empty list when the field is not enumerated).

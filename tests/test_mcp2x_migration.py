@@ -131,13 +131,17 @@ async def test_list_projects_invalid_domain_raises_toolerror():
         await list_projects("not-a-domain")
 
 
-async def test_create_workitem_invalid_type_raises_toolerror():
-    """server.py L237: unknown work-item type -> ToolError (was ValueError).
+async def test_create_workitem_invalid_type_raises_toolerror(w2_router, monkeypatch):
+    """Unknown work-item type -> ToolError listing the project's types (SPEC-wi-custom-types: discovered, no network).
 
-    RED now: raises plain ValueError on type='epic'.
+    The type list comes from the discovery, mocked on a private respx router.
     """
-    with pytest.raises(ToolError, match="Invalid type"):
-        await create_workitem(project="PROJ", title="X", type="epic")
+    from .w2_fixtures import BASE, PROJECT, mock_ccm
+
+    monkeypatch.setattr("elm_mcp.config.settings.elm_url", BASE)
+    mock_ccm(w2_router)
+    with pytest.raises(ToolError, match="Type 'epic' not found in this project. Available types:"):
+        await create_workitem(project=PROJECT, title="X", type="epic")
 
 
 async def test_update_workitem_no_fields_raises_toolerror():

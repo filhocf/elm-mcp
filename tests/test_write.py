@@ -170,9 +170,15 @@ async def test_add_child_workitem_requires_project():
         await add_child_workitem(parent_id="10", title="Sub-task")
 
 
-async def test_create_workitem_invalid_type():
-    with pytest.raises(ToolError, match="Invalid type"):
-        await create_workitem(project="PROJ", title="X", type="epic")
+async def test_create_workitem_invalid_type(w2_router, monkeypatch):
+    """Unknown type: refused with the project's available types (discovered; no network, nothing created)."""
+    from .w2_fixtures import PROJECT, mock_ccm
+
+    monkeypatch.setattr("elm_mcp.config.settings.elm_url", BASE)
+    mock_ccm(w2_router)
+    with pytest.raises(ToolError, match="Available types: .*task") as exc:
+        await create_workitem(project=PROJECT, title="X", type="epic")
+    assert "epic" in str(exc.value)
 
 
 async def test_update_workitem_no_fields():

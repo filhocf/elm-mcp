@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Changed
+
+- `list_workitems` now returns `{"items": [...], "truncated": bool}` instead of a list, follows `oslc:nextPage` up to `limit` items (default 50, max 1000) and re-authenticates once per page.
+- `create_workitem` accepts any work item type the project exposes (id, title or short alias such as `task`/`story`); an unknown type is refused listing the available ones.
+
 ### Fixed
 
 W1 live-acceptance fixes (ELM 7.0.1):

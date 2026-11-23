@@ -120,9 +120,6 @@ async def search_testcases(project: str, query: str | None = None) -> list[dict]
     return await oslc.query_resources("qm", project, query)
 
 
-TYPE_IDS = oslc.CCM_TYPE_IDS
-
-
 @read_tool
 async def list_iterations(project: str) -> list[dict]:
     """List iterations (sprints/releases) for an RTC project with title and dates."""
@@ -272,21 +269,20 @@ async def create_workitem(
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
         title: Work item title (required)
-        type: "task" or "story" (default: "task"). Other types from list_types are not accepted yet (SPEC-wi-custom-types).
+        type: Any work item type of the project (default: "task"): the id or title shown by list_types, or a short alias such as task or story. An unknown type is refused listing the available ones.
         description: HTML description (optional)
         parent_id: Parent work item ID (optional)
         owner: Username of the owner, stored in dcterms:contributor (optional, e.g., "jdoe")
         filed_against: Category URI (optional). If not provided, the property is not sent and the server applies its own default. Valid values: list_fields (property filedAgainst, allowedValues).
         custom_fields: Dict of extra RDF fields to inject (e.g., {"rtc_ext:campo": "valor"})
     """
-    if type not in TYPE_IDS:
-        raise ToolError(f"Invalid type '{type}'. Must be one of: {list(TYPE_IDS.keys())}")
     project_url = await oslc._resolve_project_url("ccm", project)
+    type_id = oslc._resolve_ccm_type(await oslc._list_ccm_creation_factories(project_url), type)["id"]
     project_area_id = oslc._project_area_id(project_url)
     payload: dict = {
         "dcterms:title": title,
         "dcterms:type": "http://open-services.net/ns/cm#ChangeRequest",
-        "rtc_cm:type": {"rdf:resource": f"{settings.elm_url}/ccm/oslc/types/{project_area_id}/{TYPE_IDS[type]}"},
+        "rtc_cm:type": {"rdf:resource": f"{settings.elm_url}/ccm/oslc/types/{project_area_id}/{type_id}"},
     }
     if description:
         payload["dcterms:description"] = description
@@ -455,8 +451,7 @@ async def list_types(domain: str, project: str) -> list[dict]:
     Returns [{"title", "shape_uri", "resource_type"}] for rm/qm. For ccm, one item per
     creation factory of a work item type:
     [{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]
-    ("id" is valid for list_fields; create_workitem accepts only "task" or "story" for now.
-    Arbitrary types are planned in SPEC-wi-custom-types.)
+    ("id" is valid for list_fields and create_workitem, which also take the title or a short alias.)
     """
     domain = domain.lower()
     if domain not in VALID_DOMAINS:
@@ -472,7 +467,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
         domain: rm | ccm | qm
         project: Project name
         type: Shape title (as shown by list_types); matched case-insensitively.
-            For ccm: the type id or title from list_types, or the alias task/story.
+            For ccm: the type id or title from list_types, or a short alias (task, story...).
 
     Returns {"type", "shape_uri", "required":[...], "optional":[...]}; each field has
     name, title, occurs, read_only, property_uri, range_uri and allowed_values.
