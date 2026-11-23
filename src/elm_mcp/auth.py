@@ -1,6 +1,8 @@
 """Form-based Jazz authentication with cookie management."""
 
+import asyncio
 import logging
+import weakref
 
 import httpx
 
@@ -11,6 +13,25 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 _client: httpx.AsyncClient | None = None
+
+
+class SessionState:
+    """Login serialization of one client: a lock and a generation that grows with every re-login."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.generation = 0
+
+
+_sessions: "weakref.WeakKeyDictionary[httpx.AsyncClient, SessionState]" = weakref.WeakKeyDictionary()
+
+
+def session_state(client: httpx.AsyncClient) -> SessionState:
+    """The login state of ``client`` (created on first use; one per client, hence per event loop)."""
+    state = _sessions.get(client)
+    if state is None:
+        state = _sessions[client] = SessionState()
+    return state
 
 
 async def _refuse_foreign_redirect(response: httpx.Response) -> None:

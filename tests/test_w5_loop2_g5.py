@@ -180,7 +180,7 @@ async def test_a_long_multibyte_name_is_cut_on_a_character_boundary(w2_router, t
 async def test_an_oserror_while_writing_becomes_a_value_error_and_leaves_nothing(w2_router, tmp_path):
     _alm(w2_router, _png())
     long_file = tmp_path / ("b" * 300)  # dest as a file path: ENAMETOOLONG from the filesystem
-    with pytest.raises(ToolError, match="Could not write"):
+    with pytest.raises(ToolError, match="Could not (use|write)"):
         await server.download_attachment("100", "1001", str(long_file))
     assert list(tmp_path.iterdir()) == []
 

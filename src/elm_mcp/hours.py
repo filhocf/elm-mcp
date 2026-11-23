@@ -19,6 +19,7 @@ MS_PER_HOUR = 3_600_000
 MAX_CONCURRENT_ENTRIES = 8
 GROUP_BY = ("person", "item")
 UNKNOWN_PERSON = "(unknown)"
+MAX_ENTRIES_CEILING = 5000
 
 
 def ms_to_hours(value) -> float:
@@ -121,7 +122,12 @@ async def collect_hours(item_ids: list[str], group_by: str, max_entries: int) ->
     infos = await asyncio.gather(*(_read_item_sheet(client, wid, gate) for wid in item_ids))
     errors = [i["error"] for i in infos if i["error"]]
 
-    pairs = [(i["id"], uri) for i in infos for uri in i["uris"]]  # item order, then sheet order
+    pairs, seen = [], set()
+    for i in infos:  # item order, then sheet order; an entry listed by two items is read and counted once
+        for uri in i["uris"]:
+            if uri not in seen:
+                seen.add(uri)
+                pairs.append((i["id"], uri))
     to_read, unread = pairs[:max_entries], len(pairs) - min(len(pairs), max_entries)
     results = await _read_entries(client, [uri for _, uri in to_read])
 
@@ -159,7 +165,8 @@ async def collect_hours(item_ids: list[str], group_by: str, max_entries: int) ->
         "total_hours": ms_to_hours(total_ms),
         "items_counted": len(infos),
         "entries_read": read,
-        "partial": unread > 0,
+        # partial: entries were left unread (max_entries) OR an entry failed, so the totals miss some time
+        "partial": unread > 0 or bool(errors),
         "unread_entries": unread,
         "items_without_entries": without,
         "errors": errors,

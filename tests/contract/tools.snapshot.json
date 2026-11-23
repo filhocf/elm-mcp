@@ -171,7 +171,7 @@
     },
     {
       "name": "download_attachment",
-      "read_only": true,
+      "read_only": false,
       "parameters": [
         {
           "name": "id",
