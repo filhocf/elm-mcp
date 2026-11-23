@@ -7,6 +7,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+Hours and attachments, read only (SPEC-horas, SPEC-ccm-interno, wave W5):
+
+- `list_time(id)`: entries of a work item's time sheet (`entry_uri`, `person`, `date`, `hours`, `time_code`) and `total_hours`. Milliseconds become hours with 2 decimals; null time is 0.
+- `get_hours(item_ids=None, plan=None, project=None, group_by="person", max_entries=500)`: hours per person or per work item for the given items and their direct children (the `get_plan_items` selection). Entries are read with at most 8 requests at a time; above `max_entries` it returns a partial result (`partial`, `unread_entries`); an unreadable entry goes to `errors`; an item with `timeSpent` but no entries is marked `without_entries`.
+- `list_attachments(id)`: attachment metadata (`uri`, `name` without the identifier prefix, `identifier`, `format`, `creator`, `created`).
+- `download_attachment(id, attachment, dest, overwrite=False)`: saves an attachment to a local file (`Accept: */*`, base name of the server's `filename*` only, no overwrite without `overwrite=True`, size cap `ELM_MAX_DOWNLOAD_MB`, default 50, no partial file left). It only sends GET requests to the ALM.
+- Writing time entries and attachments through the internal API stays deferred (no `ELM_ENABLE_INTERNAL_API`).
+
 Discovery cache and RM query (SPEC-cache-shape, SPEC-rm-consulta, wave W4):
 
 - Discovery cache in memory (provider, factories, shapes, allowedValues, workflow, RM stream), per server and project area; TTL from `ELM_CACHE_TTL` (default 300 s, `0` turns it off).

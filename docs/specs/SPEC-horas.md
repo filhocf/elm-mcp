@@ -1,6 +1,6 @@
 # SPEC — Horas: leitura da folha e agregação por pessoa e por item
 
-**Status:** G0 feito (leitura viva 23/nov) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W5 · **Depende de:** `SPEC-paginacao-sessao`, `SPEC-ccm-correcoes`
+**Status:** DONE (G0 leitura viva 23/nov; G3/G4 em W5; aceitação viva pendente) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W5 · **Depende de:** `SPEC-paginacao-sessao`, `SPEC-ccm-correcoes`
 **Origem:** caso de uso real do backlog: IB com 99 tarefas filhas, `timeSpent` nulo em 53, ~130 entradas de folha lidas uma a uma com 130 chamadas de `get_requirement`.
 
 ## Evidência G0 (leitura viva, 23/nov/2026)
