@@ -1,6 +1,6 @@
 # SPEC — Links OSLC cross-domínio (rastreabilidade)
 
-**Status:** PLANNED (G0) · **Release:** v0.7.0 · **RFC-mãe:** RFC-001 §5
+**Status:** PLANNED (G0) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5
 **Pesquisa:** `pesquisa-apis-elm.md §1/§3` · `levantamento-interno-alm.md §C.8/C.9/C.10`
 **Classe:** entregável de produto — fecha a matriz AC→código→teste→ALM (fase ⑨ do DAIA)
 

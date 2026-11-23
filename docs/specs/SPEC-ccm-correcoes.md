@@ -1,6 +1,6 @@
 # SPEC — Correções CCM contra ELM 7.0.1
 
-**Status:** G1 · **Release:** v0.5.1 (correção) · **Guarda-chuva:** `SPEC-ewm-delta` F1 · **ADR:** ADR-003
+**Status:** DONE (G5) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F1 · **ADR:** ADR-003
 **Classe:** correção de defeito (observado no servidor de referência)
 
 ## Defeitos

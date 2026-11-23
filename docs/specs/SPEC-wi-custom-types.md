@@ -1,6 +1,6 @@
 # SPEC — Tipos de work item além de task/story
 
-**Status:** PLANNED (G0) · **Release:** v0.7.0 · **RFC-mãe:** RFC-001 §5
+**Status:** PLANNED (G0) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5
 **Pesquisa:** `levantamento-interno-alm.md §C.14` · **Classe:** entregável de produto
 
 ## Meta

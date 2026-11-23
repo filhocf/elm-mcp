@@ -1,6 +1,6 @@
 # SPEC — Folha de horas e upload de anexo (API interna, atrás de flag)
 
-**Status:** PLANNED · **Release:** v0.8.0 · **Guarda-chuva:** `SPEC-ewm-delta` F5 · **Depende de:** `SPEC-ccm-correcoes`
+**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F5 · **Depende de:** `SPEC-ccm-correcoes`
 
 ## Contexto (verificado no servidor de referência)
 - Folha de horas: leitura por OSLC 2.0 (`rtc_cm:timeSheet` → `rtc_cm:entry`). Escrita por OSLC responde 405. Só funciona pelo
