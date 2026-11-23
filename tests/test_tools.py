@@ -105,9 +105,10 @@ async def test_get_workitem():
 
 @pytest.mark.asyncio
 async def test_search_testcases():
-    with patch("elm_mcp.server.oslc.query_resources", new_callable=AsyncMock) as mock:
-        mock.return_value = [{"title": "TC-001"}]
+    # D12 (W3): test cases come from the QM reader (TestCase capability, RDF/XML), not query_resources.
+    with patch("elm_mcp.qm.query_members", new_callable=AsyncMock) as mock:
+        mock.return_value = ([{"title": "TC-001", "uri": "u"}], None, False)
         result = await search_testcases("QA Project")
-        mock.assert_called_once_with("qm", "QA Project", None, limit=1000)
+        mock.assert_called_once_with("QA Project", "TestCase", None, 1000)
         assert result["items"][0]["title"] == "TC-001"
         assert result["truncated"] is False
