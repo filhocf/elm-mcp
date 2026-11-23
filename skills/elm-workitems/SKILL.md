@@ -120,8 +120,8 @@ update_workitem(
 )
 
 # --- Transition (workflow action, NOT update_workitem) ---
-transition_workitem(id="100300", action="a27")        # id suffix of a workflow action
-transition_workitem(id="100300", action="start")      # only if a unique action id contains "start"
+transition_workitem(id="100300", action="a27")  # id suffix of a workflow action
+transition_workitem(id="100300", action="start")  # only if a unique action id contains "start"
 ```
 
 ## Notes / Gotchas
