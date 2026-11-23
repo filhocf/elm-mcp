@@ -182,6 +182,8 @@ class QmWriteServer(w3.QmServer):
         foreign_factory_for: str | None = None,
         post_status: int | None = None,
         post_body: str = "",
+        post_headers: dict[str, str] | None = None,
+        weak_etag: bool = False,
         post_timeout: str | None = None,  # "stored": the server creates it then never answers; "lost": never creates it
         put_status: int | None = None,
         put_body: str = "",
@@ -206,6 +208,7 @@ class QmWriteServer(w3.QmServer):
             **kwargs,
         )
         self.post_status, self.post_body, self.post_timeout = post_status, post_body, post_timeout
+        self.post_headers, self.weak_etag = post_headers or {}, weak_etag
         self.put_status, self.put_body = put_status, put_body
         self.delete_status, self.delete_body = delete_status, delete_body
         self.after_delete_status = after_delete_status
@@ -292,7 +295,7 @@ class QmWriteServer(w3.QmServer):
         if "json" in accept and "rdf+xml" not in accept:
             return httpx.Response(406, text="Not Acceptable")
         if self.post_status is not None:
-            return httpx.Response(self.post_status, text=self.post_body)
+            return httpx.Response(self.post_status, text=self.post_body, headers=self.post_headers)
         if "rdf+xml" not in request.headers.get("content-type", "").lower():
             return httpx.Response(415, text="Only RDF/XML is accepted")
         try:
@@ -345,7 +348,8 @@ class QmWriteServer(w3.QmServer):
         if uri not in self.store:
             return httpx.Response(404, text="")
         entry = self.store[uri]
-        headers = {} if self.hide_etag else {"ETag": f'"{entry["version"]}"'}
+        etag = f'"{entry["version"]}"'
+        headers = {} if self.hide_etag else {"ETag": f"W/{etag}" if self.weak_etag else etag}
         response = self._rdf(200, entry["doc"], headers)
         if self.change_after_get:
             entry["version"] += 1  # a concurrent edit lands right after this read
