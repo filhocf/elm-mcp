@@ -455,10 +455,25 @@ async def test_set_field_unknown_item_names_the_gate(w2_router):
 def _mock_story_workflow(router) -> None:
     """Project discovery + the Story shape (its state property points at the workflow states) + workflow docs."""
     mock_ccm(router)
-    state_prop = f.prop("state", "State", "Exactly-one", propdef=f"{f.RTC_CM}state", allowed=f.STATES_URL)
+    allowed_url = f"{BASE}/ccm/oslc/shapes/workitems/{f.STORY_ID}/property/internalState/allowedValues"
+    state_prop = f.prop("state", "State", "Exactly-one", propdef=f"{f.RTC_CM}state", allowed=allowed_url)
     title_prop = f.prop("title", "Summary", "Exactly-one", propdef="http://purl.org/dc/terms/title")
     router.get(f.shape_uri(f.STORY_ID)).mock(
         return_value=httpx.Response(200, text=f.real_shape_xml(f.STORY_ID, [state_prop, title_prop]))
+    )
+    refs = "".join(
+        f'<oslc:allowedValue rdf:resource="{f.STATES_URL}/{sid}"/>'
+        for sid in (f"{f.WF}.state.s1", f.STATE_IDLE, f.STATE_RUNNING)
+    )
+    router.get(allowed_url).mock(
+        return_value=httpx.Response(
+            200,
+            text=(
+                '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+                'xmlns:oslc="http://open-services.net/ns/core#">'
+                f'<rdf:Description rdf:about="{allowed_url}">{refs}</rdf:Description></rdf:RDF>'
+            ),
+        )
     )
     router.get(f.STATES_URL).mock(return_value=httpx.Response(200, json=f.states_json()))
     router.get(f.ACTIONS_URL).mock(return_value=httpx.Response(200, json=f.actions_json()))
@@ -501,11 +516,11 @@ async def test_list_workflow_type_without_a_state_property_is_an_error(w2_router
         await server.list_workflow(PROJECT, "task")
 
 
-async def test_list_workflow_missing_states_document_names_the_gate(w2_router):
+async def test_list_workflow_missing_states_document_falls_back_to_the_state_ids(w2_router):
     _mock_story_workflow(w2_router)
     w2_router.get(f.STATES_URL).mock(return_value=httpx.Response(404))
-    with pytest.raises(ToolError, match=r"\[recurso-inexistente-ou-invisivel\]"):
-        await server.list_workflow(PROJECT, "story")
+    result = await server.list_workflow(PROJECT, "story")
+    assert [s["id"] for s in result["states"]] == [f"{f.WF}.state.s1", f.STATE_IDLE, f.STATE_RUNNING]
 
 
 async def test_list_workflow_missing_actions_document_names_the_gate(w2_router):
@@ -520,12 +535,12 @@ async def test_list_workflow_missing_actions_document_names_the_gate(w2_router):
 # ======================================================================
 ITERATION = f"{BASE}/ccm/resource/itemOid/com.ibm.team.apt.Iteration/_ITER1"
 FILTER_PATTERNS = {
-    "type": r'(dcterms|rtc_cm):type\s*=\s*"Task"',
-    "state": r'(oslc_cm:status|rtc_cm:state)\s*=\s*"In Progress"',
-    "owner": r'dcterms:contributor\s*=\s*(<[^>]*/jdoe>|"jdoe")',
+    "type": r'rtc_cm:type\s*=\s*"task"',
+    "state": r'rtc_cm:state\s*=\s*"com\.example\.workflow\.state\.s3"',
+    "owner": r"dcterms:contributor\s*=\s*<[^>]*/jdoe>",
     "planned_for": rf"rtc_cm:plannedFor\s*=\s*<{re.escape(ITERATION)}>",
 }
-FILTER_VALUES = {"type": "Task", "state": "In Progress", "owner": "jdoe", "planned_for": ITERATION}
+FILTER_VALUES = {"type": "Task", "state": "com.example.workflow.state.s3", "owner": "jdoe", "planned_for": ITERATION}
 
 
 def _query_setup(router) -> FakePages:
