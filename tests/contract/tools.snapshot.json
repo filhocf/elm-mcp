@@ -62,6 +62,39 @@
       ]
     },
     {
+      "name": "create_qm_resource",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "description",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "if_exists",
+          "type": "string",
+          "required": false,
+          "default": "error"
+        }
+      ]
+    },
+    {
       "name": "create_requirement",
       "read_only": false,
       "parameters": [
@@ -155,6 +188,17 @@
           "type": "string",
           "required": false,
           "default": "error"
+        }
+      ]
+    },
+    {
+      "name": "delete_qm_resource",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
         }
       ]
     },
@@ -338,6 +382,27 @@
         },
         {
           "name": "target_uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "link_test_case",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "test_case",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target",
           "type": "string",
           "required": true
         },
@@ -686,6 +751,27 @@
       ]
     },
     {
+      "name": "unlink_test_case",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "test_case",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "unlink_workitems",
       "read_only": false,
       "parameters": [
@@ -703,6 +789,29 @@
           "name": "link_type",
           "type": "string",
           "required": true
+        }
+      ]
+    },
+    {
+      "name": "update_qm_resource",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "title",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "description",
+          "type": "null|string",
+          "required": false,
+          "default": null
         }
       ]
     },

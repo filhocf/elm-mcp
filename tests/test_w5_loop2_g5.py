@@ -54,7 +54,7 @@ async def test_snapshot_marks_download_attachment_as_a_write_tool():
     by_name = {t["name"]: t for t in snap["tools"]}
     assert by_name["download_attachment"]["read_only"] is False
     assert sum(t["read_only"] for t in snap["tools"]) == 21
-    assert sum(not t["read_only"] for t in snap["tools"]) == 14
+    assert sum(not t["read_only"] for t in snap["tools"]) == 19  # 14 + the 5 QM write tools of W6
 
 
 async def test_download_dir_allows_a_destination_inside_the_root(w2_router, tmp_path, monkeypatch):

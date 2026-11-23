@@ -7,6 +7,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+ETM (QM) write, scope by evidence (SPEC-qm-write, wave W6). Live acceptance of the writes is pending (writing to the reference ALM is suspended); everything is verified against mocks only:
+
+- `create_qm_resource(project, type, title, description=None, if_exists="error")`: creates a `TestCase`, `TestPlan`, `TestSuite` or `TestScript` by POSTing RDF/XML with only `dcterms:title` (+ `dcterms:description`) to the creation factory found by `oslc:resourceType` (local name, `oslc_qm` and `rqm` namespaces). The title is escaped and stripped of control characters. `uri` and `short_id` are read back from the `Location`. Duplicate check by normalized title among resources of the same type (`if_exists` as in `create_requirement`); the POST is never resent after a timeout. `TestExecutionRecord`, `TestResult`, native script steps and other types are refused as deferred.
+- `update_qm_resource(uri, title=None, description=None)`: re-reads the resource and sends the complete RDF back with `If-Match`, changing only the title/description (byte edit of what the server sent: links, rich-text sections and namespaces are preserved). A 412 is a `[conflito]` error, not retried; a resource without ETag is never written.
+- `delete_qm_resource(uri)`: DELETE confirmed by re-reading (404/410); a denied confirmation read reports that the deletion was not confirmed.
+- `link_test_case(test_case, target, link_type)` / `unlink_test_case(...)`: adds or removes `oslc_qm:validatesRequirement` (RM requirement) or `oslc_qm:testsChangeRequest` (CCM work item) on a TestCase, preserving the other links, and confirms that the final set equals the expected one by re-reading.
+- G5 final fix (W6): a failure or divergence in the re-read after a successful PUT (`update_qm_resource`, `link_test_case`, `unlink_test_case`) now says the PUT SUCCEEDED and the resource WAS changed, and not to retry blindly; the post-PUT comparison ignores whitespace/CRLF differences and tolerates properties added by the server.
+- G5 loop 2 (W6): QM URIs are matched anchored (no `..`, `%`, backslash, query; `/qm/oslc_qm/contexts/<p>/resources/<type>/<id>` only), RM/CCM link targets likewise; the edited body is re-parsed and checked BEFORE the PUT (update and link/unlink), `update_qm_resource` re-reads and confirms after the PUT; a 201 with a foreign `Location` says the resource may exist; title <= 255 and description <= 32768 characters; weak ETags, titles kept as XML attributes and unlinks that would leave a reified `rdf:Statement` are refused.
+
 Hours and attachments, read only (SPEC-horas, SPEC-ccm-interno, wave W5):
 
 - `list_time(id)`: entries of a work item's time sheet (`entry_uri`, `person`, `date`, `hours`, `time_code`) and `total_hours`. Milliseconds become hours with 2 decimals; null time is 0.

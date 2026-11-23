@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rqm_auto="http://jazz.net/ns/auto/rqm#"
+    xmlns:bp="http://open-services.net/ns/basicProfile#"
+    xmlns:acp="http://jazz.net/ns/acp#"
+    xmlns:cmx="http://open-services.net/ns/cm-x#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:calm="http://jazz.net/xmlns/prod/jazz/calm/1.0/"
+    xmlns:rqm_lm="http://jazz.net/ns/qm/rqm/labmanagement#"
+    xmlns:acc="http://open-services.net/ns/core/acc#"
+    xmlns:process="http://jazz.net/ns/process#"
+    xmlns:dcterms="http://purl.org/dc/terms/"
+    xmlns:oslc="http://open-services.net/ns/core#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:rqm_process="http://jazz.net/xmlns/prod/jazz/rqm/process/1.0/"
+    xmlns:oslc_config="http://open-services.net/ns/config#"
+    xmlns:oslc_cm="http://open-services.net/ns/cm#"
+    xmlns:skos="http://www.w3.org/2004/02/skos/core#"
+    xmlns:rqm_qm="http://jazz.net/ns/qm/rqm#"
+    xmlns:oslc_qm="http://open-services.net/ns/qm#"
+    xmlns:oslc_rm="http://open-services.net/ns/rm#"
+    xmlns:jrs="http://jazz.net/ns/jrs#"
+    xmlns:foaf="http://xmlns.com/foaf/0.1/"
+    xmlns:oslc_auto="http://open-services.net/ns/auto#"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema#" >
+ <rdf:Description rdf:nodeID="A0">
+  <rdf:subject rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001"/>
+  <rdf:predicate rdf:resource="http://open-services.net/ns/qm#validatesRequirement"/>
+  <rdf:object rdf:resource="https://elm.example.com/rm/resources/TX_hDQNkB3GEfGD-fsEtTDLSg"/>
+  <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"/>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+ </rdf:Description>
+ <rdf:Description rdf:nodeID="A1">
+  <rdf:subject rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001"/>
+  <rdf:predicate rdf:resource="http://open-services.net/ns/qm#testsChangeRequest"/>
+  <rdf:object rdf:resource="https://elm.example.com/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/610669"/>
+  <rdf:type rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement"/>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/category/urn:com.ibm.rqm:category:_OohoUZB7Ee-05of4dO9qjQ">
+  <oslc:hidden rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</oslc:hidden>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testcase.edit.testscript">
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">text</dcterms:identifier>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:content rdf:datatype="http://www.w3.org/2001/XMLSchema#string">{"linkState":true}</rqm_qm:content>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestPlan#RichTextSection"/>
+  <rdf:type rdf:resource="http://jazz.net/ns/qm/rqm#RichTextSection"/>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.defects.web.RmLinks">
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">text</dcterms:identifier>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:content rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></rqm_qm:content>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestPlan#RichTextSection"/>
+  <rdf:type rdf:resource="http://jazz.net/ns/qm/rqm#RichTextSection"/>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001">
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testcase.edit.testscript"/>
+  <oslc:shortId rdf:datatype="http://www.w3.org/2001/XMLSchema#int">93770</oslc:shortId>
+  <rqm_qm:shortIdentifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">93770</rqm_qm:shortIdentifier>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
+  <rqm_qm:category_OoLDAZB7Ee-05of4dO9qjQ rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/category/urn:com.ibm.rqm:category:_OohoUZB7Ee-05of4dO9qjQ#"/>
+  <dcterms:created rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-03-23T13:40:27.828Z</dcterms:created>
+  <dcterms:creator rdf:resource="https://elm.example.com/jts/users/jdoe"/>
+  <rqm_process:hasWorkflowState rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/process-info/_PA1/workflowstate/com.ibm.rqm.process.testcase.workflow/com.ibm.rqm.planning.common.new"/>
+  <dcterms:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-03-26T14:24:22.928Z</dcterms:modified>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:scriptStepCount rdf:datatype="http://www.w3.org/2001/XMLSchema#long">3</rqm_qm:scriptStepCount>
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001</dcterms:identifier>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <rqm_qm:template rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/template/testcase/com.ibm.rqm.planning.templates.testcase.template_1484588715038"/>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testCaseExpectedResults"/>
+  <acp:accessControl rdf:resource="https://elm.example.com/qm/oslc_qm/accessControl/_PA1"/>
+  <oslc_qm:validatesRequirement rdf:resource="https://elm.example.com/rm/resources/TX_hDQNkB3GEfGD-fsEtTDLSg"/>
+  <rqm_process:hasPriority rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/process-info/_PA1/priority/literal.priority.101"/>
+  <acc:accessContext rdf:resource="https://elm.example.com/qm/acclist#_PA1"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.defects.web.RmLinks"/>
+  <rqm_qm:isSuspect rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</rqm_qm:isSuspect>
+  <dcterms:contributor rdf:resource="https://elm.example.com/jts/users/jdoe"/>
+  <oslc_qm:testsChangeRequest rdf:resource="https://elm.example.com/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/610669"/>
+  <rqm_qm:isLocked rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</rqm_qm:isLocked>
+  <rqm_qm:category rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/category/urn:com.ibm.rqm:category:_OohoUZB7Ee-05of4dO9qjQ"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
+  <oslc_qm:usesTestScript rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedExecutionScript/_ID002"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestCase"/>
+  <rdf:type rdf:resource="http://open-services.net/ns/qm#TestCase"/>
+  <rqm_qm:weight rdf:datatype="http://www.w3.org/2001/XMLSchema#int">100</rqm_qm:weight>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <dcterms:relation rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/_PA1/testcase/urn:com.ibm.rqm:testcase:93770"/>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669">
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">text</dcterms:identifier>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:content rdf:datatype="http://www.w3.org/2001/XMLSchema#string">&lt;div xmlns="http://www.w3.org/1999/xhtml"&gt;&lt;p&gt;text&lt;/p&gt;&lt;/div&gt;</rqm_qm:content>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestPlan#RichTextSection"/>
+  <rdf:type rdf:resource="http://jazz.net/ns/qm/rqm#RichTextSection"/>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testCaseExpectedResults">
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">text</dcterms:identifier>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:content rdf:datatype="http://www.w3.org/2001/XMLSchema#string">&lt;div xmlns="http://www.w3.org/1999/xhtml"&gt;&lt;p&gt;text&lt;/p&gt;&lt;/div&gt;</rqm_qm:content>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestPlan#RichTextSection"/>
+  <rdf:type rdf:resource="http://jazz.net/ns/qm/rqm#RichTextSection"/>
+ </rdf:Description>
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID001#com.ibm.rqm.planning.editor.section.testCasePreCondition">
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">text</dcterms:identifier>
+  <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
+  <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Test case 1</dcterms:title>
+  <rqm_qm:content rdf:datatype="http://www.w3.org/2001/XMLSchema#string">&lt;div xmlns="http://www.w3.org/1999/xhtml"&gt;&lt;p&gt;text&lt;/p&gt;&lt;/div&gt;</rqm_qm:content>
+  <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
+  <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
+  <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestPlan#RichTextSection"/>
+  <rdf:type rdf:resource="http://jazz.net/ns/qm/rqm#RichTextSection"/>
+ </rdf:Description>
+</rdf:RDF>
