@@ -5,8 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+CCM collaboration (SPEC-ccm-colaboracao, wave W2):
+
+- `add_comment(id, text)`: POSTs the comment as OSLC CM 1.0 (`application/x-oslc-cm-change-request+json`,
+  no `OSLC-Core-Version`) and confirms it appears in the discussion; if it does not, the call fails without
+  resending the POST.
+- `list_comments(id)`: comments of a work item (`oslc:discussedBy` -> `oslc:comment`) as
+  `[{"id", "author", "created", "text"}]`; an item without discussion returns `[]`.
+- `link_workitems(source, target, link_type)` / `unlink_workitems(...)`: partial PUT of the link property
+  (`rtc_cm:com.ibm.team.workitem.linktype.*`) with `If-Match`, keeping the other links of that type, confirmed by
+  re-reading the source. Types: `parent`, `blocks`, `depends_on`, `related`, `duplicate_of`, `resolves`
+  (`parent` replaces the current parent).
+- `set_field(id, field, value)`: partial PUT of one field; an enumerated field takes the literal title
+  (e.g. `5 pts`) or id, validated against `allowedValues`, and warns when `Unassigned` is written to a required
+  attribute.
+- `list_workflow(project, type)`: states (`id`, `title`, `group`) and action ids of a type's workflow.
+
 ### Changed
 
+- `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
+  `oslc.where` (combined with `query` by `and`); a filter value with a quote, angle bracket or backslash is refused.
 - `list_workitems` now returns `{"items": [...], "truncated": bool}` instead of a list, follows `oslc:nextPage` up to `limit` items (default 50, max 1000) and re-authenticates once per page.
 - `create_workitem` accepts any work item type the project exposes (id, title or short alias such as `task`/`story`); an unknown type is refused listing the available ones.
 

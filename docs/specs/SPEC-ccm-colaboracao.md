@@ -1,6 +1,6 @@
 # SPEC — Colaboração CCM: comentários, links, campos e consultas
 
-**Status:** PLANNED · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
+**Status:** G4 GREEN (respx, W2) — aceitação viva pendente · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
 
 ## Tools novas ou ampliadas
 | Tool | Como (verificado no servidor de referência) |
@@ -24,3 +24,18 @@ Em itens descartáveis: comentar e reler; criar e remover `depends_on` e `relate
 
 ## Gates
 G3 (respx: 405 na 2.0, 201 na 1.0, preservação de links) → G4 → G5 → aceitação viva.
+
+## Nomes verificados no servidor real (7.0.1, leitura)
+Prefixo `rtc_cm:com.ibm.team.workitem.linktype.`: `parent` → `parentworkitem.parent` (inverso `parentworkitem.children`);
+`blocks` → `blocksworkitem.blocks`; `depends_on` → `blocksworkitem.dependsOn`; `related` → `relatedworkitem.related`;
+`duplicate_of` → `duplicateworkitem.duplicateOf` (inverso `duplicates`); `resolves` → `resolvesworkitem.resolves`
+(inverso `resolvedBy`). Valores: lista de `{"rdf:resource", "dcterms:title"}`. Discussão: `oslc:discussedBy` →
+`.../oslc/workitems/<id>/rtc_cm:comments`, que devolve `{"oslc:comment": [...], "oslc:discussionAbout": ...}`.
+Filtros: `dcterms:type` (título), `oslc_cm:status` (título), `dcterms:contributor` (URI de usuário), `rtc_cm:plannedFor` (URI de iteração).
+
+## A confirmar na aceitação viva (to be confirmed in live acceptance)
+- Corpo de um comentário individual (`dcterms:identifier`/`creator`/`created`/`description`) e a resposta do POST (`rdf:about`).
+- Formato do documento `allowedValues` da enumeração usado por `set_field` e o título do literal "Unassigned".
+- Que a propriedade de estado do shape aponta para `/oslc/workflows/{pa}/states/{wf}` (base de `list_workflow`).
+- Que o serviço de consulta aceita os quatro filtros em `oslc.where` (sem `oslc.prefix` explícito).
+- `parent` substitui o pai atual (um item tem um só pai): confirmar no re-parent.

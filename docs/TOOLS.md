@@ -1,6 +1,6 @@
 # Tools reference
 
-The eighteen MCP tools exposed today. All are async and validated through the `@tool` boundary
+The twenty-five MCP tools exposed today (fourteen read-only, eleven write). All are async and validated through the `@tool` boundary
 (invalid input or domain failures surface as `ToolError`). `domain` is one of `rm`, `ccm`, `qm`.
 See `docs/USAGE.md` for query syntax and examples.
 
@@ -11,10 +11,12 @@ See `docs/USAGE.md` for query syntax and examples.
 | `list_projects`     | `(domain)` | List projects (service providers) for a domain. |
 | `search_requirements` | `(project, query=None)` | OSLC query over RM requirements (DOORS Next). |
 | `get_requirement`   | `(uri)` | Fetch a single requirement by its OSLC URI. RM answers HTTP 415 to JSON, so it falls back to `application/rdf+xml` and returns a flat dict (`rdf:about`, `prefix:name` -> text, XML string for `parseType="Literal"`, or URI; repeated properties become lists). |
-| `list_workitems`    | `(project, query=None, limit=None)` | OSLC query over CCM work items, following the server's pages until `limit` items (default 50, maximum 1000, no duplicates). Returns `{"items": [{id, title, type, status, owner}], "truncated": bool}`; `truncated=true` means the query has more items. An expired session is re-authenticated once per page; a page that keeps failing raises an error naming the gate and how many items had been collected. |
+| `list_workitems`    | `(project, query=None, limit=None, type=None, state=None, owner=None, planned_for=None)` | OSLC query over CCM work items. Optional filters, applied by the server in `oslc.where` and combined with `query` by `and`: `type` (type title, `dcterms:type`), `state` (state title, `oslc_cm:status`), `owner` (user id or URI, `dcterms:contributor`), `planned_for` (iteration URI, `rtc_cm:plannedFor`); a filter value with a quote, angle bracket or backslash is refused before any request. Results follow the server's pages until `limit` items (default 50, maximum 1000, no duplicates). Returns `{"items": [{id, title, type, status, owner}], "truncated": bool}`; `truncated=true` means the query has more items. An expired session is re-authenticated once per page; a page that keeps failing raises an error naming the gate and how many items had been collected. |
 | `get_workitem`      | `(id)` | Fetch a single work item by ID. |
 | `search_testcases`  | `(project, query=None)` | OSLC query over QM test cases (ETM). |
 | `list_iterations`   | `(project)` | List a project's iterations (title, dates, URI). |
+| `list_comments`     | `(id)` | Comments of a work item (`oslc:discussedBy` -> `oslc:comment`), in thread order: `[{"id", "author", "created", "text"}]`. An item without discussion returns `[]`. |
+| `list_workflow`     | `(project, type)` | Workflow of a work item type (`type` as in `create_workitem`): `{"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}`. The action ids are what `transition_workitem` accepts. A type whose shape does not expose its workflow is an error. |
 | `get_plan_items`    | `(project, plan=None, item_ids=None)` | Hierarchical view: backlog items with child tasks expanded in one call. Select by `plan` (iteration title substring) or `item_ids`. |
 
 ## Discovery
@@ -45,6 +47,10 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `update_workitem`     | `(id, title=None, description=None, owner=None, estimate_hours=None, planned_for=None, custom_fields=None)` | Partial update: PUTs only the given properties (`?oslc.properties=...`) with `If-Match`. A stale ETag (412) is reported as a conflict. `owner` is stored in `dcterms:contributor`. |
 | `add_child_workitem`  | `(parent_id, title, type="task", description=None, owner=None, project=...)` | Create a work item linked as a child of `parent_id`. |
 | `transition_workitem` | `(id, action)` | Execute a workflow action on a work item (`PUT ?_action=<id>`) and re-read its state. `action` is the id of a workflow action, its id suffix (e.g. `a27`), or a unique case-insensitive substring of the id; `start`/`resolve`/`close`/`reopen` work only where the workflow's action ids contain those words. An unresolved or ambiguous `action` lists the available ids; an action that does not change the state is an error. Returns `Work item {id}: {from} -> {to} (action: {action id})`. |
+| `add_comment`         | `(id, text)` | POST the comment as OSLC CM 1.0 (`application/x-oslc-cm-change-request+json`, no `OSLC-Core-Version`: the 2.0 endpoint answers 405) and confirm it in `list_comments`. Returns the new comment. If the server accepts the POST but the comment does not appear, the call fails and the POST is **not** resent (check the item before retrying). |
+| `link_workitems`      | `(source, target, link_type)` | Add a link from `source` to `target`: partial PUT of `rtc_cm:com.ibm.team.workitem.linktype.<type>` with `If-Match`, resending the links of that type already there; confirmed by re-reading `source`. `link_type`: `parent` (`parentworkitem.parent`, replaces the current parent), `blocks` (`blocksworkitem.blocks`), `depends_on` (`blocksworkitem.dependsOn`), `related` (`relatedworkitem.related`), `duplicate_of` (`duplicateworkitem.duplicateOf`), `resolves` (`resolvesworkitem.resolves`). An unknown type is refused listing the valid ones. |
+| `unlink_workitems`    | `(source, target, link_type)` | Remove only that link (the PUT resends the remaining links, an empty list for the last one); confirmed by re-reading. A target that is not linked is an error, nothing written. |
+| `set_field`           | `(id, field, value)` | Partial PUT of one field with `If-Match`. `field` is the prefixed property (`rtc_cm:storyPoints`) or the shape's property name (`storyPoints`). For an enumerated field `value` is the literal title (`5 pts`) or id, validated against `allowedValues` (a value outside them is refused listing the valid titles). Returns `{"id", "field", "value", "warnings"}`; writing `Unassigned` to a required attribute adds a warning (the server treats it as empty). |
 
 ## Errors
 

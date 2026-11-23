@@ -24,6 +24,8 @@ Esforço 🟢 baixo · 🟡 médio · 🔴 alto. Status por spec no cabeçalho d
 | **v0.5.0** | RM write + discovery (membrana agêntica P0) | `SPEC-rm-create-requirement`, `SPEC-discovery-tools` | 🟡 |
 | **v0.6.0** | Tudo o que estava represado (decisão do Claudio, 23/nov): correções F1/F2 + colaboração + QM + rastreabilidade + perfil + API interna + QM write | `SPEC-ccm-correcoes`, `SPEC-rm-correcoes`, `SPEC-ccm-colaboracao`, `SPEC-wi-custom-types`, `SPEC-qm-leitura`, `SPEC-oslc-links`, `SPEC-perfil-template`, `SPEC-ccm-interno`, `SPEC-qm-write` + transversais (contrato versionado, diagnóstico de gate 401, paginação/sessão, cache de shape, idempotência, agregação de horas) | 🔴 |
 | **v0.7.0** | (absorvida pela v0.6.0) | — | — |
+| **v0.6.0** | Rastreabilidade + tipos + colaboração CCM | `SPEC-oslc-links`, `SPEC-wi-custom-types`, `SPEC-ccm-colaboracao` (G4 GREEN) | 🟡 |
+| **v0.7.0** | Teste + relatórios | `SPEC-qm-write`, `SPEC-reportbuilder-rs` | 🔴 |
 | **v0.8.0** | Instalação first-class + credenciais | `SPEC-credential-keyring`, `SPEC-first-class-install` | 🟡 |
 | **v1.0.0** | Quando o conjunto estiver sólido (decisão do Claudio) | — | — |
 
