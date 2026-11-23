@@ -404,6 +404,35 @@ async def list_comments(id: str) -> list[dict]:
 
 
 @tool
+async def link_workitems(source: str, target: str, link_type: str) -> dict:
+    """Link work item `source` to `target`, keeping the existing links of that type.
+
+    Args:
+        source: Work item ID that receives the link
+        target: Work item ID linked to
+        link_type: parent | blocks | depends_on | related | duplicate_of | resolves
+            ("parent" replaces the current parent: a work item has one parent)
+
+    Confirmed by re-reading the source. Returns {"source", "target", "link_type", "property", "changed"}.
+    """
+    return await oslc.link_workitems(source, target, link_type)
+
+
+@tool
+async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
+    """Remove only the `link_type` link from `source` to `target` (other links are kept).
+
+    Args:
+        source: Work item ID that holds the link
+        target: Work item ID to unlink
+        link_type: parent | blocks | depends_on | related | duplicate_of | resolves
+
+    Confirmed by re-reading the source. Returns {"source", "target", "link_type", "property", "changed"}.
+    """
+    return await oslc.unlink_workitems(source, target, link_type)
+
+
+@tool
 async def create_requirement(
     project: str,
     title: str,

@@ -1699,3 +1699,61 @@ async def add_comment(id: str, text: str) -> dict:
     return new[-1]
 
 
+# ---------------------------------------------------------------------------------------------
+# Links
+# ---------------------------------------------------------------------------------------------
+def _link_property(link_type: str) -> str:
+    prop = LINK_TYPES.get((link_type or "").strip().lower())
+    if prop is None:
+        raise ValueError(f"Unknown link type '{link_type}'. Valid link types: {', '.join(LINK_TYPES)}")
+    return prop
+
+
+def _linked_keys(item: dict, prop: str) -> list[str]:
+    return [_workitem_key(u) for u in (_resource_uri(e) for e in _as_list(item.get(prop))) if u]
+
+
+async def _change_link(source: str, target: str, link_type: str, *, add: bool) -> dict:
+    prop = _link_property(link_type)
+    kind = link_type.strip().lower()
+    operation = "link_workitems" if add else "unlink_workitems"
+    target_key = str(target).strip()
+    if not target_key:
+        raise ValueError("Target work item id must not be empty.")
+    client = await get_client()
+    uri = workitem_uri(source)
+    item, etag = await _read_item(client, uri, operation)
+    current = [u for u in (_resource_uri(e) for e in _as_list(item.get(prop))) if u]
+    keys = [_workitem_key(u) for u in current]
+    if add:
+        if target_key in keys and (kind not in _SINGLE_VALUED_LINKS or len(keys) == 1):
+            return {"source": source, "target": target, "link_type": kind, "property": prop, "changed": False}
+        kept = [] if kind in _SINGLE_VALUED_LINKS else current
+        values = [*kept, workitem_uri(target_key)]
+    else:
+        if target_key not in keys:
+            raise ValueError(f"Work item {source} has no '{kind}' link to work item {target_key}; nothing to remove.")
+        values = [u for u, k in zip(current, keys, strict=True) if k != target_key]
+    await _put_partial(client, uri, etag, item, {prop: [{"rdf:resource": v} for v in values]}, operation)
+
+    reread, _ = await _read_item(client, uri, operation)
+    linked = target_key in _linked_keys(reread, prop)
+    if linked is not add:
+        state = "does not show" if add else "still shows"
+        raise ValueError(
+            f"The server accepted the write but the re-read of work item {source} {state} the '{kind}' link "
+            f"to {target_key} ({prop}). Not retried."
+        )
+    return {"source": source, "target": target, "link_type": kind, "property": prop, "changed": True}
+
+
+async def link_workitems(source: str, target: str, link_type: str) -> dict:
+    """Add a link source -> target (partial PUT of the link property, existing links preserved)."""
+    return await _change_link(source, target, link_type, add=True)
+
+
+async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
+    """Remove only the link source -> target, resending the remaining links of that type."""
+    return await _change_link(source, target, link_type, add=False)
+
+
