@@ -1864,6 +1864,72 @@ async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
     return await _change_link(source, target, link_type, add=False)
 
 
+# Cross-domain links (SPEC-oslc-links): closed list of oslc_cm properties of the work item shape.
+# The write format is the one of link_workitems; to be confirmed in live acceptance.
+ARTIFACT_LINK_TYPES = (
+    "implementsRequirement",
+    "tracksRequirement",
+    "affectsRequirement",
+    "testedByTestCase",
+    "relatedTestCase",
+    "relatedTestScript",
+    "relatedTestPlan",
+    "relatedTestExecutionRecord",
+    "affectsPlanItem",
+    "affectedByDefect",
+    "affectsTestResult",
+    "blocksTestExecutionRecord",
+    "relatedChangeRequest",
+)
+
+
+async def _change_artifact_link(source_uri: str, target_uri: str, link_type: str, *, add: bool) -> dict:
+    operation = "link_artifacts" if add else "unlink_artifacts"
+    if link_type not in ARTIFACT_LINK_TYPES:
+        raise ValueError(f"Unknown link type '{link_type}'. Valid link types: {', '.join(ARTIFACT_LINK_TYPES)}")
+    prop = f"oslc_cm:{link_type}"
+    source, target = (source_uri or "").strip(), (target_uri or "").strip()
+    if not target:
+        raise ValueError("Target URI must not be empty.")
+    assert_same_origin(source)
+    assert_same_origin(target)
+    if source == target:
+        raise ValueError(f"{source} cannot be linked to itself.")
+    result = {"source_uri": source, "target_uri": target, "link_type": link_type, "property": prop}
+    client = await get_client()
+    item, etag = await _read_item(client, source, operation)
+    current = [u for u in (_resource_uri(e) for e in _as_list(item.get(prop))) if u]
+    if add:
+        if target in current:
+            return {**result, "changed": False}
+        values = [*current, target]
+    else:
+        if target not in current:
+            raise ValueError(f"{source} has no '{link_type}' link to {target}; nothing to remove.")
+        values = [u for u in current if u != target]
+    await _put_partial(client, source, etag, item, {prop: [{"rdf:resource": v} for v in values]}, operation)
+
+    reread, _ = await _read_item(client, source, operation)
+    linked = target in [u for u in (_resource_uri(e) for e in _as_list(reread.get(prop))) if u]
+    if linked is not add:
+        state = "does not show" if add else "still shows"
+        raise ValueError(
+            f"The server accepted the write but the re-read of {source} {state} the '{link_type}' link "
+            f"to {target} ({prop}). Not retried."
+        )
+    return {**result, "changed": True}
+
+
+async def link_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Add an oslc_cm link from a work item to an artifact (partial PUT, existing targets preserved)."""
+    return await _change_artifact_link(source_uri, target_uri, link_type, add=True)
+
+
+async def unlink_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Remove only the link source -> target, resending the remaining targets of that type."""
+    return await _change_artifact_link(source_uri, target_uri, link_type, add=False)
+
+
 # ---------------------------------------------------------------------------------------------
 # set_field
 # ---------------------------------------------------------------------------------------------

@@ -520,6 +520,34 @@ async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
 
 
 @tool
+async def link_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Link a work item to an artifact of another domain (requirement, test case...), keeping the other links.
+
+    Args:
+        source_uri: URI of the work item that receives the link
+        target_uri: URI of the destination (RM or QM), on the same ELM server
+        link_type: implementsRequirement | tracksRequirement | affectsRequirement | testedByTestCase |
+            relatedTestCase | relatedTestScript | relatedTestPlan | relatedTestExecutionRecord |
+            affectsPlanItem | affectedByDefect | affectsTestResult | blocksTestExecutionRecord |
+            relatedChangeRequest
+
+    Partial PUT of oslc_cm:<link_type> with If-Match, confirmed by re-reading the source. Writing is to be
+    confirmed in live acceptance. Returns {"source_uri", "target_uri", "link_type", "property", "changed"}.
+    """
+    return await oslc.link_artifacts(source_uri, target_uri, link_type)
+
+
+@tool
+async def unlink_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Remove only the `link_type` link from the work item `source_uri` to `target_uri` (others are kept).
+
+    Same link types as link_artifacts. Confirmed by re-reading the source.
+    Returns {"source_uri", "target_uri", "link_type", "property", "changed"}.
+    """
+    return await oslc.unlink_artifacts(source_uri, target_uri, link_type)
+
+
+@tool
 async def set_field(id: str, field: str, value: str) -> dict:
     """Set one field of a work item via a partial PUT (If-Match).
 
