@@ -45,6 +45,25 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `add_child_workitem`  | `(parent_id, title, type="task", description=None, owner=None, project=...)` | Create a work item linked as a child of `parent_id`. |
 | `transition_workitem` | `(id, action)` | Execute a workflow action on a work item (`PUT ?_action=<id>`) and re-read its state. `action` is the id of a workflow action, its id suffix (e.g. `a27`), or a unique case-insensitive substring of the id; `start`/`resolve`/`close`/`reopen` work only where the workflow's action ids contain those words. An unresolved or ambiguous `action` lists the available ids; an action that does not change the state is an error. Returns `Work item {id}: {from} -> {to} (action: {action id})`. |
 
+## Errors
+
+A failed HTTP call surfaces as a `ToolError` that starts with the gate that probably blocked it, then the
+status, the operation and the action to take. Reads and writes re-authenticate once on a 401 or on a 403
+without `oslc:message` before reporting.
+
+| Gate | Status | Meaning / action |
+|---|---|---|
+| `credencial` | 401 at login | Invalid user or password: check `ELM_USER` / `ELM_PASSWORD`. |
+| `sessao` | 401 after login | Session expired and re-authentication did not help: retry. |
+| `regra-de-processo` | 403 with `oslc:message` | A process rule refused the write; the server message is repassed unchanged. |
+| `permissao` | 403 without message | Role, license or project area visibility insufficient. |
+| `recurso-inexistente-ou-invisivel` | 404 | The URI does not exist or the project area is not visible to the user. |
+| `conflito` | 412 | The resource changed since it was read: re-read and retry. |
+| `formato` | 406 | The server does not offer the format (QM only answers RDF/XML). |
+
+Other statuses are reported as `[http-<status>]` with the server message, if any. Credentials, cookies and
+the `Authorization` header never appear in the message.
+
 ## Notes
 
 - **Discover before you write.** `create_requirement`/`create_workitem` need shape and field values

@@ -26,7 +26,7 @@ async def test_catalog_url_401():
         resp = httpx.Response(401, request=httpx.Request("GET", "http://test"))
         client.get.return_value = resp
         mock_client.return_value = client
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ValueError, match="sessao"):
             await get_catalog_url("rm")
 
 
@@ -37,7 +37,7 @@ async def test_get_resource_404():
         resp = httpx.Response(404, request=httpx.Request("GET", "http://test/rm/req/999"))
         client.get.return_value = resp
         mock_client.return_value = client
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ValueError, match="recurso-inexistente-ou-invisivel"):
             await get_resource("http://test/rm/req/999")
 
 

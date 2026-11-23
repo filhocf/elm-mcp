@@ -36,6 +36,8 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
 
 ### Changed
 
+- Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
+- Reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached.
 - `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
   `reopen` work only where the workflow's action ids contain those words.
 

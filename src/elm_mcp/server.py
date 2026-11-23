@@ -113,8 +113,9 @@ async def list_iterations(project: str) -> list[dict]:
     project_area_id = parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
     client = await oslc.get_client()
     url = f"{settings.elm_url}/ccm/oslc/iterations?projectArea={project_area_id}"
-    resp = await client.get(url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    resp.raise_for_status()
+    resp = await oslc.fetch(
+        client, "GET", url, "list_iterations", headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    )
     results = resp.json().get("oslc:results", [])
     iterations = []
     for r in results:

@@ -17,8 +17,13 @@ async def get_client() -> httpx.AsyncClient:
     """Get authenticated httpx client, re-authenticating if needed."""
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(verify=False, timeout=60.0, follow_redirects=True)
-        await _authenticate(_client)
+        client = httpx.AsyncClient(verify=False, timeout=60.0, follow_redirects=True)
+        try:
+            await _authenticate(client)
+        except BaseException:
+            await client.aclose()  # never keep a client whose login failed
+            raise
+        _client = client
     return _client
 
 
@@ -30,9 +35,12 @@ async def _authenticate(client: httpx.AsyncClient) -> None:
         data={"j_username": settings.elm_user, "j_password": settings.elm_password},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    # Jazz returns 200 or 302 on success; check for auth failure header
-    if "X-com-ibm-team-repository-web-auth-msg" in resp.headers:
-        raise RuntimeError(f"ELM authentication failed for user '{settings.elm_user}'")
+    # Jazz returns 200 or 302 on success; an auth failure header (or a 401) means bad credentials
+    if "X-com-ibm-team-repository-web-auth-msg" in resp.headers or resp.status_code == 401:
+        raise RuntimeError(
+            f"[credencial] ELM authentication failed for user '{settings.elm_user}': invalid user or password. "
+            "Check ELM_USER and ELM_PASSWORD."
+        )
 
 
 async def close_client() -> None:

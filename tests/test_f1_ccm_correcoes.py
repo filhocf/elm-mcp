@@ -494,7 +494,7 @@ async def test_d9_persistent_401_retries_only_once():
     """D9: a second 401 after re-authentication is an error (no retry loop)."""
     auth, typed, _ = _setup_create()
     typed.mock(return_value=httpx.Response(401, text="Unauthorized"))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ValueError, match="sessao"):
         await oslc.create_resource("ccm", PROJECT, {"dcterms:title": "X"}, wi_type="task")
     assert typed.call_count == 2
     assert auth.call_count == 2
@@ -840,7 +840,7 @@ async def test_g5l2_create_persistent_403_without_message_retries_only_once():
     """G5 L2 item 3: segundo 403 sem mensagem é erro (sem laço)."""
     auth, typed, _ = _setup_create()
     typed.mock(return_value=httpx.Response(403, text="Forbidden"))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ValueError, match="permissao"):
         await oslc.create_resource("ccm", PROJECT, {"dcterms:title": "X"}, wi_type="task")
     assert typed.call_count == 2
     assert auth.call_count == 2
