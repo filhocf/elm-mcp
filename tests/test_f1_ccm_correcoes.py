@@ -796,3 +796,90 @@ async def test_d13_non_category_refusal_has_no_list_fields_hint():
         await create_workitem(project=PROJECT, title="T", type="task")
     assert SERVER_MESSAGE in str(exc.value)
     assert "list_fields" not in str(exc.value)
+
+
+# ======================================================================
+# Loop 2 do G5
+# ======================================================================
+@pytest.mark.parametrize("action", ["", " ", "  \t", "s"])
+@respx.mock
+async def test_g5l2_transition_blank_or_one_char_action_raises_toolerror_without_writing(action):
+    """G5 L2 item 1: action vazio/só espaços/1 caractere não casa por substring; nenhum PUT/POST."""
+    routes = f.mock_workflow()
+    only_one = {"oslc:results": [{"rdf:about": f"{f.ACTIONS_URL}/{f.ACTION_PREFIX}startWorking"}]}
+    routes["actions"].mock(return_value=httpx.Response(200, json=only_one))
+    with pytest.raises(ToolError):
+        await transition_workitem(id=f.WI_ID, action=action)
+    assert routes["put"].call_count == 0
+    assert not [
+        c for c in respx.calls if c.request.method in ("PUT", "POST") and "j_security_check" not in str(c.request.url)
+    ]
+
+
+@respx.mock
+async def test_g5l2_transition_exact_id_still_works_and_action_is_stripped():
+    """G5 L2 item 1: id exato continua valendo; espaços ao redor são removidos."""
+    routes = f.mock_workflow()
+    await transition_workitem(id=f.WI_ID, action="  startWorking ")
+    assert routes["put"].calls[0].request.url.params.get("_action") == f.ACTION_PREFIX + "startWorking"
+
+
+@respx.mock
+async def test_g5l2_create_403_without_oslc_message_reauthenticates_and_resends_once():
+    """G5 L2 item 3: 403 sem oslc:message (CSRF/sessão obsoleta) -> reautentica e reenvia UMA vez."""
+    auth, typed, _ = _setup_create()
+    typed.mock(side_effect=[httpx.Response(403, text="Forbidden"), httpx.Response(201, json=CREATED)])
+    result = await create_workitem(project=PROJECT, title="T", type="task")
+    assert result["dcterms:identifier"] == "42"
+    assert typed.call_count == 2
+    assert auth.call_count == 2
+
+
+@respx.mock
+async def test_g5l2_create_persistent_403_without_message_retries_only_once():
+    """G5 L2 item 3: segundo 403 sem mensagem é erro (sem laço)."""
+    auth, typed, _ = _setup_create()
+    typed.mock(return_value=httpx.Response(403, text="Forbidden"))
+    with pytest.raises(httpx.HTTPStatusError):
+        await oslc.create_resource("ccm", PROJECT, {"dcterms:title": "X"}, wi_type="task")
+    assert typed.call_count == 2
+    assert auth.call_count == 2
+
+
+@respx.mock
+async def test_g5l2_create_403_with_oslc_message_does_not_reauthenticate():
+    """G5 L2 item 3: 403 com oslc:message continua indo direto ao ToolError (um POST, um login)."""
+    auth, typed, _ = _setup_create()
+    typed.mock(return_value=httpx.Response(403, json={"oslc:message": SERVER_MESSAGE}))
+    with pytest.raises(ToolError, match="Preconditions"):
+        await create_workitem(project=PROJECT, title="T", type="task")
+    assert typed.call_count == 1
+    assert auth.call_count == 1
+
+
+@respx.mock
+async def test_g5l2_create_owner_path_traversal_is_fully_quoted():
+    """G5 L2 item 4: owner 'jdoe/../admin' -> %2F no URI (sem separador de caminho)."""
+    _setup_create()
+    await create_workitem(project=PROJECT, title="T", type="task", owner="jdoe/../admin")
+    assert _contributor_uris(_posted_body()) == [f"{BASE}/jts/users/jdoe%2F..%2Fadmin"]
+
+
+@respx.mock
+async def test_g5l2_update_owner_path_traversal_is_fully_quoted():
+    """G5 L2 item 4: o mesmo em update_workitem."""
+    _, put = _mock_update()
+    await update_workitem(id=U_ID, owner="jdoe/../admin")
+    sent = json.loads(put.calls[0].request.content)
+    assert sent["dcterms:contributor"] == {"rdf:resource": f"{BASE}/jts/users/jdoe%2F..%2Fadmin"}
+
+
+@respx.mock
+async def test_g5l2_list_types_unescapes_html_entities_in_factory_title(monkeypatch):
+    """G5 L2 item 6: título da fábrica com entidade XML ('R&amp;D') sai como 'R&D'."""
+    original = f.services_xml()
+    monkeypatch.setattr(f, "services_xml", lambda: original.replace("Technical Debt", "R&amp;D"))
+    f.mock_ccm_discovery()
+    _mock_property_only_shapes()
+    by_id = {r["id"]: r for r in await list_types("ccm", PROJECT)}
+    assert by_id[DEBT_ID]["title"] == "R&D"
