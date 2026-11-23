@@ -521,22 +521,44 @@ def _check_text_result(
         doc = _scan(data)
         node = _subject(doc, uri)
     except ValueError as exc:
-        raise ValueError(f"Check failed on {where}: {exc} {_NOT_WRITTEN[written]}") from exc
+        raise ValueError(f"Check failed on {where}: {exc}{_suffix(written)}") from exc
     problems = []
     for local, text in expected.items():
         values = [doc.text(c) for c in node.children if c.name == f"{{{_DCTERMS}}}{local}"]
-        if values != [text]:
+        if [_squash(v) for v in values] != [_squash(text)]:
             problems.append(f"'{local}' is {values!r}, expected exactly [{text!r}]")
     rest = sum(1 for c in node.children if c.name not in {f"{{{_DCTERMS}}}{k}" for k in ("title", "description")})
-    if rest != others:
+    # after the PUT the server may add a property of its own (a modified date...): fewer is a loss, more is fine
+    if rest < others or (not written and rest != others):
         problems.append(f"{rest} other properties, expected {others}")
     if _top_nodes(doc) != top:
         problems.append(f"{_top_nodes(doc)} top-level nodes, expected {top}")
     if problems:
-        raise ValueError(f"Check failed on {where}: {'; '.join(problems)}. {_NOT_WRITTEN[written]}")
+        raise ValueError(f"Check failed on {where}: {'; '.join(problems)}.{_suffix(written)}")
 
 
-_NOT_WRITTEN = {False: "Nothing was written.", True: "Not retried: check the resource."}
+_NOT_WRITTEN = {
+    False: "Nothing was written.",
+    True: "The PUT SUCCEEDED and the resource WAS changed on the server; do not retry blindly: re-read it.",
+}
+
+
+def _suffix(written: bool) -> str:
+    """Closing sentence of a check failure; after the PUT, ``_written_error`` says it instead."""
+    return "" if written else f" {_NOT_WRITTEN[False]}"
+
+
+def _squash(text: str) -> str:
+    """Text compared without the whitespace/CRLF differences a server may normalize."""
+    return " ".join(text.split())
+
+
+def _written_error(cause: object) -> ValueError:
+    """The PUT went through but the confirmation failed or disagrees: say so, so nobody retries blindly."""
+    return ValueError(
+        f"The PUT SUCCEEDED and the resource WAS changed on the server; confirmation failed: {cause}; "
+        "do not retry blindly: re-read it."
+    )
 
 
 async def update_resource(uri: str, title: str | None = None, description: str | None = None) -> dict:
@@ -570,8 +592,11 @@ async def update_resource(uri: str, title: str | None = None, description: str |
     body = _apply(data, edits)
     _check_text_result(body, uri, expected, others, top, written=False)
     await _put(client, uri, body, etag, "update_qm_resource")
-    reread = await oslc.fetch(client, "GET", uri, "update_qm_resource", headers=qm._HEADERS)
-    _check_text_result(reread.content, uri, expected, others, top, written=True)
+    try:
+        reread = await oslc.fetch(client, "GET", uri, "update_qm_resource", headers=qm._HEADERS)
+        _check_text_result(reread.content, uri, expected, others, top, written=True)
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        raise _written_error(exc) from exc
     return {"uri": uri, "updated": changed}
 
 
@@ -651,15 +676,15 @@ async def change_link(test_case: str, target: str, link_type: str, *, add: bool)
     _check_link_result(body, source, link_type, wanted, len(node.children) + len(wanted) - len(current), doc)
     await _put(client, source, body, etag, operation)
 
-    reread = await oslc.fetch(client, "GET", source, operation, headers=qm._HEADERS)
-    final = set(_link_targets(_subject(_scan(reread.content), source), link_type))
-    if final != expected:
-        lost, extra = sorted(expected - final), sorted(final - expected)
-        detail = (f" Missing targets: {', '.join(lost)}." if lost else "") + (
-            f" Unexpected targets: {', '.join(extra)}." if extra else ""
-        )
-        raise ValueError(
-            f"The server accepted the write but the re-read of {source} does not match the expected "
-            f"'{link_type}' targets.{detail} Not retried: check the test case."
-        )
+    try:
+        reread = await oslc.fetch(client, "GET", source, operation, headers=qm._HEADERS)
+        final = set(_link_targets(_subject(_scan(reread.content), source), link_type))
+        if final != expected:
+            lost, extra = sorted(expected - final), sorted(final - expected)
+            detail = (f" Missing targets: {', '.join(lost)}." if lost else "") + (
+                f" Unexpected targets: {', '.join(extra)}." if extra else ""
+            )
+            raise ValueError(f"the re-read of {source} does not match the expected '{link_type}' targets.{detail}")
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        raise _written_error(exc) from exc
     return {**result, "changed": True}
