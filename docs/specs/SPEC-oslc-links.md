@@ -35,7 +35,7 @@ o mesmo de `link_workitems` e fica marcado "a confirmar na aceitação viva".
 - SE o `link_type` for desconhecido, ENTÃO o sistema DEVE recusar com `ToolError` listando os tipos válidos.
 - QUANDO um link for removido, o sistema DEVE preservar as demais propriedades do recurso (PUT parcial
   com ETag).
-- O sistema DEVE usar namespaces IBM/Jazz genéricos (`calm:*`), sem tipos de organização específica.
+- O sistema DEVE usar namespace `oslc_cm:` (propriedades `oslc_cm:<tipo>`; o prefixo é resolvido pelo mapa `prefixes` do item), sem tipos de organização específica.
 
 ## Gates
 G0 → G3 (respx: criar link, tipo inválido, remoção preserva resto) → G4 → G5.

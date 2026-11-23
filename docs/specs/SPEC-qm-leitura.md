@@ -1,9 +1,10 @@
 # SPEC — QM (ETM): leitura correta e completa
 
-**Status:** DONE parcial (G4 GREEN; propriedades de TestResult e `rdf:type` de Keyword/BuildRecord/TestEnvironment confirmados na leitura viva) · G0 feito (leitura viva 23/nov) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F6 · **Antecede:** `SPEC-qm-write`
+**Status:** DONE parcial (G4 GREEN; propriedades de TestResult confirmadas na leitura viva; `rdf:type` de Keyword e BuildRecord NÃO verificados: vieram vazios no projeto de referência) · G0 feito (leitura viva 23/nov) · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F6 · **Antecede:** `SPEC-qm-write`
 
 ## Contexto (verificado no servidor de referência, ETM 7.0.1 SR1)
 - O ETM responde só RDF/XML (JSON dá 406).
+- Evidência de leitura viva: 12 dos 14 tipos foram lidos ao vivo (TestCase 187, TestScriptStep 480, TestScript 183, TestPlan 2, TestSuite 4, TestResult e TestExecutionRecord > 0). `Keyword` e `BuildRecord` vieram vazios no projeto de referência: o `rdf:type` deles NÃO foi verificado.
 - Há 14 query capabilities por projeto (TestPlan, TestCase, TestScript, TestScriptStep, TestSuite, TestExecutionRecord,
   TestSuiteExecutionRecord, TestResult, TestSuiteResult, TestData, Keyword, TestEnvironment, BuildRecord, BuildDefinition).
 - O catálogo de service providers usa atributos extras no elemento; parser ingênuo não encontra os projetos.
@@ -26,7 +27,7 @@
 ## Tools
 | Tool | Retorno |
 |---|---|
-| `list_qm_resources(project, type, query=None, page_size=50)` | Lista por tipo (os 14), com título, identificador, id curto (`rqm_qm:shortIdentifier`), estado e URI; paginação |
+| `list_qm_resources(project, type, query=None, limit=None)` | Lista por tipo (os 14), com título, identificador, id curto (`rqm_qm:shortIdentifier`), estado e URI; paginação |
 | `get_qm_resource(uri)` | Propriedades normalizadas + links (requisitos, work items, scripts, TCER, resultados) |
 | `get_test_coverage(project)` | Para cada caso de teste: requisitos validados e work items testados (rastreabilidade) |
 | `get_test_results(project, test_case=None)` | Resultados com veredito, pontos por status e TCER de origem. `verdict` é a URI do recurso de veredito (`.../ExecutionResult#com.ibm.rqm.execution.common.state.inconclusive`); `verdict_name` é o fragmento final legível (`inconclusive`); pontos zerados vêm como `0` |
@@ -37,7 +38,7 @@
 - QUANDO o catálogo for lido, o sistema DEVE reconhecer service providers com atributos adicionais no elemento.
 - QUANDO `get_qm_resource` for chamado, o sistema DEVE listar os links `validatesRequirement` e `testsChangeRequest` com as URIs de destino.
 - QUANDO a listagem passar do tamanho de página, o sistema DEVE seguir a paginação até o limite pedido.
-- ONDE a Reportable REST do ETM for usada, o sistema DEVE resolver o alias pelo feed de projetos, nunca usar o título como alias.
+- ADIADO (nenhuma tool da W3 usa a Reportable REST): ONDE a Reportable REST do ETM for usada, o sistema DEVE resolver o alias pelo feed de projetos, nunca usar o título como alias.
 
 ## Aceitação viva
 Listar casos de teste de um projeto real e conferir a contagem com o `oslc:totalCount`; abrir um caso com link a requisito e a work item.

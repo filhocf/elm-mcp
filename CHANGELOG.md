@@ -37,6 +37,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- `search_testcases` now returns the normalized ETM format: one item per test case `{uri, title, identifier, short_id, state, type}` plus `truncated` (D12: the TestCase capability is chosen by `oslc:resourceType`, RDF/XML only).
 - `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
   `oslc.where` (combined with `query` by `and`); a filter value with a quote, angle bracket or backslash is refused.
 - `list_workitems` now returns `{"items": [...], "truncated": bool}` instead of a list, follows `oslc:nextPage` up to `limit` items (default 50, max 1000) and re-authenticates once per page.

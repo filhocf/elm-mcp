@@ -144,42 +144,42 @@ async def test_query_resources_ccm_json():
 
 @respx.mock
 async def test_query_resources_xml_fallback_on_406():
-    """QM-style path: JSON 406 -> XML fallback parsed into resource entries."""
+    """JSON 406 -> XML fallback parsed into resource entries (CCM; QM is read by qm.query_members)."""
     xml_results = f"""<?xml version="1.0" encoding="UTF-8"?>
     <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
         xmlns:dcterms="http://purl.org/dc/terms/">
-        <rdf:Description rdf:about="{BASE}/qm/tc/1">
+        <rdf:Description rdf:about="{BASE}/ccm/tc/1">
             <dcterms:title>Test Case 1</dcterms:title>
         </rdf:Description>
     </rdf:RDF>"""
-    services_url = f"{BASE}/qm/oslc/contexts/_proj1/services"
-    query_base = f"{BASE}/qm/oslc/contexts/_proj1/testcases"
+    services_url = f"{BASE}/ccm/oslc/contexts/_proj1/services"
+    query_base = f"{BASE}/ccm/oslc/contexts/_proj1/testcases"
 
-    qm_rootservices = f"""<?xml version="1.0" encoding="UTF-8"?>
+    ccm_rootservices = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-    xmlns:oslc_qm="http://open-services.net/xmlns/qm/1.0/">
-    <oslc_qm:qmServiceProviders rdf:resource="{BASE}/qm/catalog"/>
+    xmlns:oslc_cm="http://open-services.net/xmlns/cm/1.0/">
+    <oslc_cm:cmServiceProviders rdf:resource="{BASE}/ccm/catalog"/>
 </rdf:Description>"""
-    qm_catalog = f"""<?xml version="1.0" encoding="UTF-8"?>
+    ccm_catalog = f"""<?xml version="1.0" encoding="UTF-8"?>
 <oslc:ServiceProviderCatalog xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     xmlns:dcterms="http://purl.org/dc/terms/" xmlns:oslc="http://open-services.net/ns/core#">
-    <oslc:ServiceProvider rdf:about="{BASE}/qm/oslc/contexts/_proj1">
-        <dcterms:title>QM Proj</dcterms:title>
+    <oslc:ServiceProvider rdf:about="{BASE}/ccm/oslc/contexts/_proj1">
+        <dcterms:title>CCM Proj</dcterms:title>
     </oslc:ServiceProvider>
 </oslc:ServiceProviderCatalog>"""
-    qm_services = f"""<?xml version="1.0" encoding="UTF-8"?>
+    ccm_services = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
     xmlns:oslc="http://open-services.net/ns/core#">
     <oslc:QueryCapability>
-        <oslc:resourceType rdf:resource="http://open-services.net/ns/qm#TestCase"/>
+        <oslc:resourceType rdf:resource="http://open-services.net/ns/cm#ChangeRequest"/>
         <oslc:queryBase rdf:resource="{query_base}"/>
     </oslc:QueryCapability>
 </rdf:RDF>"""
 
     respx.post(f"{BASE}/jts/j_security_check").mock(return_value=httpx.Response(200))
-    respx.get(f"{BASE}/qm/rootservices").mock(return_value=httpx.Response(200, text=qm_rootservices))
-    respx.get(f"{BASE}/qm/catalog").mock(return_value=httpx.Response(200, text=qm_catalog))
-    respx.get(services_url).mock(return_value=httpx.Response(200, text=qm_services))
+    respx.get(f"{BASE}/ccm/rootservices").mock(return_value=httpx.Response(200, text=ccm_rootservices))
+    respx.get(f"{BASE}/ccm/catalog").mock(return_value=httpx.Response(200, text=ccm_catalog))
+    respx.get(services_url).mock(return_value=httpx.Response(200, text=ccm_services))
     respx.get(query_base).mock(
         side_effect=[
             httpx.Response(406),
@@ -187,5 +187,5 @@ async def test_query_resources_xml_fallback_on_406():
         ]
     )
 
-    results = await oslc.query_resources("qm", "QM Proj")
-    assert results == [{"rdf:about": f"{BASE}/qm/tc/1", "dcterms:title": "Test Case 1"}]
+    results = await oslc.query_resources("ccm", "CCM Proj")
+    assert results == [{"rdf:about": f"{BASE}/ccm/tc/1", "dcterms:title": "Test Case 1"}]

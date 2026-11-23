@@ -13,6 +13,7 @@ inconclusive``); ``verdict`` keeps that URI and ``verdict_name`` is its readable
 """
 
 import logging
+import re
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -47,6 +48,7 @@ _RQM_PROCESS = "http://jazz.net/xmlns/prod/jazz/rqm/process/1.0/"
 # Namespaces of the QM domain types (verified live): capabilities and members are matched by local name
 # in either of them, and in no other.
 _QM_TYPE_NAMESPACES = (oslc.NS["oslc_qm"], _RQM)
+_INT_RE = re.compile(r"-?[0-9]+")
 _HEADERS = {"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
 
 # Link property (local name) -> group of the "links" of get_qm_resource.
@@ -93,7 +95,16 @@ def _types(desc: ET.Element) -> list[str]:
 
 
 def _member_type(desc: ET.Element) -> str | None:
-    """Plain name of the QM domain type of a Description (not a ``*Query``), or None (not a member)."""
+    """Plain name of the QM domain type of a node (not a ``*Query``), or None (not a member).
+
+    The type is the ``rdf:type`` of a Description or, for a typed RDF/XML node, its own element name.
+    """
+    tag = desc.tag
+    if tag != f"{{{_RDF}}}Description":
+        ns, _, local = tag[1:].partition("}")
+        if f"{ns}" in _QM_TYPE_NAMESPACES and local and not local.endswith("Query"):
+            return local
+        return None
     for uri in _types(desc):
         for ns in _QM_TYPE_NAMESPACES:
             local = uri[len(ns) :] if uri.startswith(ns) else ""
@@ -140,23 +151,26 @@ def _grouped_links(member: dict) -> dict[str, list[str]]:
     return groups
 
 
-def _page(xml_text: str) -> tuple[list[dict], int | None, str | None]:
-    """(members, totalCount, nextPage) of a query answer."""
+def _page(xml_text: str, type_name: str | None = None) -> tuple[list[dict], int | None, str | None]:
+    """(members, totalCount, nextPage) of a query answer; ``type_name`` keeps only members of that type.
+
+    Members are typed ``rdf:Description`` elements or typed RDF/XML nodes (``<oslc_qm:TestCase rdf:about=..>``).
+    """
     members: list[dict] = []
     total: int | None = None
     next_url: str | None = None
-    for desc in _parse(xml_text).findall(f"{{{_RDF}}}Description"):
-        if f"{_CORE}ResponseInfo" in _types(desc):
+    for desc in _parse(xml_text):
+        if f"{_CORE}ResponseInfo" in _types(desc) or desc.tag == f"{{{_CORE}}}ResponseInfo":
             nxt = desc.find(f"{{{_CORE}}}nextPage")
             if nxt is not None and nxt.get(f"{{{_RDF}}}resource"):
                 next_url = nxt.get(f"{{{_RDF}}}resource")
             count = _text(desc, _CORE, "totalCount")
-            if count is not None and count.lstrip("-").isdigit():
+            if count is not None and _INT_RE.fullmatch(count):
                 total = int(count)
             continue
-        type_name = _member_type(desc)
-        if type_name is not None and desc.get(f"{{{_RDF}}}about"):
-            members.append(_describe(desc, type_name))
+        found = _member_type(desc)
+        if found is not None and desc.get(f"{{{_RDF}}}about") and (type_name is None or found == type_name):
+            members.append(_describe(desc, found))
     return members, total, next_url
 
 
@@ -185,7 +199,9 @@ async def _query_base(project_url: str, type_name: str) -> str:
             rt = qc.find(f"{{{_CORE}}}resourceType")
             base = qc.find(f"{{{_CORE}}}queryBase")
             if rt is not None and base is not None and rt.get(f"{{{_RDF}}}resource") in wanted:
-                bases.append(base.get(f"{{{_RDF}}}resource"))
+                href = base.get(f"{{{_RDF}}}resource")
+                if href and href not in bases:
+                    bases.append(href)
         if len(bases) > 1:
             raise ValueError(
                 f"Ambiguous: the project '{project_url}' has {len(bases)} query capabilities named {local_wanted}."
@@ -227,7 +243,14 @@ async def query_members(
     total: int | None = None
     pages = 1
     while True:
-        page_members, page_total, next_url = _page(resp.text)
+        page_members, page_total, next_url = _page(resp.text, type_name)
+        if pages == 1 and page_total and not page_members:
+            logger.warning(
+                "query_members: %s reports totalCount=%d but 0 members could be read from the page",
+                type_name,
+                page_total,
+            )
+            return results, page_total, True
         if pages == 1:
             total = page_total
         new_on_page = 0
@@ -298,13 +321,15 @@ async def get_test_coverage(project: str) -> dict:
 
 def _points(member: dict, name: str) -> int | None:
     value = member["_literals"].get(name)
-    return int(value) if value is not None and value.lstrip("-").isdigit() else None
+    return int(value) if value is not None and _INT_RE.fullmatch(value) else None
 
 
 def _verdict_name(verdict_uri: str) -> str | None:
-    """Readable verdict: the last segment of the fragment (``...state.inconclusive`` -> ``inconclusive``)."""
-    fragment = verdict_uri.rsplit("#", 1)[-1]
-    return fragment.rsplit(".", 1)[-1] or None
+    """Readable verdict: last dotted part of the fragment (``...#...state.inconclusive`` -> ``inconclusive``);
+    without a fragment, the last path segment."""
+    if "#" in verdict_uri:
+        return verdict_uri.rsplit("#", 1)[-1].rsplit(".", 1)[-1] or None
+    return verdict_uri.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or None
 
 
 async def get_test_results(project: str, test_case: str | None = None) -> dict:

@@ -251,7 +251,11 @@ async def list_service_providers(domain: str) -> list[dict]:
 
 
 async def _find_query_base(domain: str, project_url: str) -> str:
-    """Find the OSLC query base URL for a project's service provider."""
+    """Find the OSLC query base URL for a project's service provider (domains ``ccm`` and ``rm``)."""
+    if domain == "qm":
+        raise ValueError(
+            "QM query capabilities are chosen by resource type, not by this generic lookup: use qm.query_members."
+        )
     client = await get_client()
     resource_type = QUERY_RESOURCE_TYPE[domain]
 
@@ -1883,21 +1887,55 @@ ARTIFACT_LINK_TYPES = (
 )
 
 
+_CM_NS = NS["oslc_cm"]
+
+
+def _artifact_link_property(item: dict, link_type: str) -> str:
+    """Key of the ``oslc_cm`` link property in this item, resolved through the item's own ``prefixes`` map.
+
+    A PUT of a property under a key the item does not use would replace nothing and could drop links, so when
+    the item neither declares the oslc_cm namespace nor carries the property, the write is refused.
+    """
+    prefixes = item.get("prefixes")
+    declared = [p for p, ns in prefixes.items() if ns == _CM_NS] if isinstance(prefixes, dict) else []
+    for prefix in declared:
+        if f"{prefix}:{link_type}" in item:
+            return f"{prefix}:{link_type}"
+    if declared:
+        return f"{declared[0]}:{link_type}"
+    if f"oslc_cm:{link_type}" in item:
+        return f"oslc_cm:{link_type}"
+    raise ValueError(
+        f"The work item does not declare the oslc_cm namespace ({_CM_NS}) in its prefixes and has no "
+        f"'oslc_cm:{link_type}' property: the link was NOT written (a PUT could erase existing links)."
+    )
+
+
+def _is_workitem_uri(uri: str) -> bool:
+    path = urlparse(uri).path
+    return "/ccm/" in path and _WORKITEM_ID_RE.search(path) is not None
+
+
 async def _change_artifact_link(source_uri: str, target_uri: str, link_type: str, *, add: bool) -> dict:
     operation = "link_artifacts" if add else "unlink_artifacts"
     if link_type not in ARTIFACT_LINK_TYPES:
         raise ValueError(f"Unknown link type '{link_type}'. Valid link types: {', '.join(ARTIFACT_LINK_TYPES)}")
-    prop = f"oslc_cm:{link_type}"
     source, target = (source_uri or "").strip(), (target_uri or "").strip()
     if not target:
         raise ValueError("Target URI must not be empty.")
     assert_same_origin(source)
     assert_same_origin(target)
+    if not _is_workitem_uri(source):
+        raise ValueError(
+            f"The source {source} is not a CCM work item (expected .../ccm/.../com.ibm.team.workitem.WorkItem/<id> "
+            "or .../ccm/oslc/workitems/<id>). Only work items carry these links."
+        )
     if source == target:
         raise ValueError(f"{source} cannot be linked to itself.")
-    result = {"source_uri": source, "target_uri": target, "link_type": link_type, "property": prop}
     client = await get_client()
     item, etag = await _read_item(client, source, operation)
+    prop = _artifact_link_property(item, link_type)
+    result = {"source_uri": source, "target_uri": target, "link_type": link_type, "property": prop}
     current = [u for u in (_resource_uri(e) for e in _as_list(item.get(prop))) if u]
     if add:
         if target in current:
@@ -1910,12 +1948,22 @@ async def _change_artifact_link(source_uri: str, target_uri: str, link_type: str
     await _put_partial(client, source, etag, item, {prop: [{"rdf:resource": v} for v in values]}, operation)
 
     reread, _ = await _read_item(client, source, operation)
-    linked = target in [u for u in (_resource_uri(e) for e in _as_list(reread.get(prop))) if u]
-    if linked is not add:
+    final = {u for u in (_resource_uri(e) for e in _as_list(reread.get(prop))) if u}
+    if (target in final) is not add:
         state = "does not show" if add else "still shows"
         raise ValueError(
             f"The server accepted the write but the re-read of {source} {state} the '{link_type}' link "
             f"to {target} ({prop}). Not retried."
+        )
+    expected = set(values)
+    if final != expected:
+        lost, extra = sorted(expected - final), sorted(final - expected)
+        detail = (f" Lost targets: {', '.join(lost)}." if lost else "") + (
+            f" Unexpected targets: {', '.join(extra)}." if extra else ""
+        )
+        raise ValueError(
+            f"The server accepted the write but the re-read of {source} does not match the expected "
+            f"'{link_type}' targets ({prop}).{detail} Not retried: check the work item."
         )
     return {**result, "changed": True}
 
