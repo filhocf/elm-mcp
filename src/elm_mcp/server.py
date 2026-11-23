@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import oslc
+from . import oslc, qm
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -146,11 +146,61 @@ async def get_workitem(id: str) -> dict:
 async def search_testcases(project: str, query: str | None = None) -> dict:
     """Search test cases in an ETM project. Query uses oslc.where syntax.
 
-    Follows the server's pages up to 1000 items. Returns {"items": [...], "truncated": bool};
-    truncated=True means the query has more items than were returned.
+    One item per test case ({uri, title, identifier, short_id, state, type}). Follows the server's pages
+    up to 1000 items. Returns {"items": [...], "truncated": bool}; truncated=True means more items exist.
     """
-    results = await oslc.query_resources("qm", project, query, limit=oslc.MAX_QUERY_LIMIT)
-    return {"items": list(results), "truncated": getattr(results, "truncated", False)}
+    return await qm.search_testcases(project, query)
+
+
+@read_tool
+async def list_qm_resources(project: str, type: str, query: str | None = None, limit: int | None = None) -> dict:
+    """List ETM resources of one type, one item per resource ({uri, title, identifier, short_id, state, type}).
+
+    Args:
+        project: ETM project name
+        type: TestPlan | TestCase | TestScript | TestScriptStep | TestSuite | TestExecutionRecord |
+            TestSuiteExecutionRecord | TestResult | TestSuiteResult | TestData | Keyword | TestEnvironment |
+            BuildRecord | BuildDefinition (case-insensitive)
+        query: optional oslc.where
+        limit: items to return (default 50, maximum 1000)
+
+    Returns {"items": [...], "truncated": bool, "total": oslc:totalCount or None}.
+    """
+    return await qm.list_resources(project, type, query, limit)
+
+
+@read_tool
+async def get_qm_resource(uri: str) -> dict:
+    """Get one ETM resource: {uri, type, title, identifier, short_id, state, links}.
+
+    `links` groups the destination URIs: validates_requirement (RM), tests_change_request (CCM),
+    uses_test_script, runs_test_case, executes_test_script, test_results, ...
+    """
+    return await qm.get_resource(uri)
+
+
+@read_tool
+async def get_test_coverage(project: str) -> dict:
+    """Traceability per test case: the requirements it validates and the work items it tests.
+
+    Returns {"items": [{uri, title, short_id, requirements, work_items}], "truncated": bool}.
+    """
+    return await qm.get_test_coverage(project)
+
+
+@read_tool
+async def get_test_results(project: str, test_case: str | None = None) -> dict:
+    """Test results with verdict, points per status and the execution record they came from.
+
+    Args:
+        project: ETM project name
+        test_case: optional test case URI; keeps only the results that report on it
+
+    Returns {"items": [{uri, title, verdict, verdict_name, points, execution_record, test_case}], "truncated": bool}.
+    verdict is the URI (fragment) of the verdict resource; verdict_name is its readable last part
+    (e.g. "inconclusive"). Zeroed points come as 0.
+    """
+    return await qm.get_test_results(project, test_case)
 
 
 @read_tool
@@ -468,6 +518,34 @@ async def unlink_workitems(source: str, target: str, link_type: str) -> dict:
     Confirmed by re-reading the source. Returns {"source", "target", "link_type", "property", "changed"}.
     """
     return await oslc.unlink_workitems(source, target, link_type)
+
+
+@tool
+async def link_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Link a work item to an artifact of another domain (requirement, test case...), keeping the other links.
+
+    Args:
+        source_uri: URI of the work item that receives the link
+        target_uri: URI of the destination (RM or QM), on the same ELM server
+        link_type: implementsRequirement | tracksRequirement | affectsRequirement | testedByTestCase |
+            relatedTestCase | relatedTestScript | relatedTestPlan | relatedTestExecutionRecord |
+            affectsPlanItem | affectedByDefect | affectsTestResult | blocksTestExecutionRecord |
+            relatedChangeRequest
+
+    Partial PUT of oslc_cm:<link_type> with If-Match, confirmed by re-reading the source. Writing is to be
+    confirmed in live acceptance. Returns {"source_uri", "target_uri", "link_type", "property", "changed"}.
+    """
+    return await oslc.link_artifacts(source_uri, target_uri, link_type)
+
+
+@tool
+async def unlink_artifacts(source_uri: str, target_uri: str, link_type: str) -> dict:
+    """Remove only the `link_type` link from the work item `source_uri` to `target_uri` (others are kept).
+
+    Same link types as link_artifacts. Confirmed by re-reading the source.
+    Returns {"source_uri", "target_uri", "link_type", "property", "changed"}.
+    """
+    return await oslc.unlink_artifacts(source_uri, target_uri, link_type)
 
 
 @tool

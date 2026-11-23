@@ -11,7 +11,7 @@ import httpx
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
-from elm_mcp import oslc, server
+from elm_mcp import oslc, qm, server
 from elm_mcp.auth import close_client
 
 from . import conftest as suite_conftest
@@ -119,14 +119,25 @@ def _fake_query(monkeypatch, members: list[dict], truncated: bool) -> list[dict]
     return seen
 
 
-@pytest.mark.parametrize(
-    ("tool", "domain"), [("search_requirements", "rm"), ("search_testcases", "qm")], ids=["rm", "qm"]
-)
-async def test_search_tools_use_the_maximum_limit_and_report_truncation(monkeypatch, tool, domain):
+async def test_search_requirements_uses_the_maximum_limit_and_reports_truncation(monkeypatch):
     seen = _fake_query(monkeypatch, [{"rdf:about": f"{BASE}/x/1"}], truncated=True)
-    result = await getattr(server, tool)("PROJ")
+    result = await server.search_requirements("PROJ")
     assert result == {"items": [{"rdf:about": f"{BASE}/x/1"}], "truncated": True}
-    assert seen == [{"domain": domain, "limit": oslc.MAX_QUERY_LIMIT}]
+    assert seen == [{"domain": "rm", "limit": oslc.MAX_QUERY_LIMIT}]
+
+
+async def test_search_testcases_uses_the_maximum_limit_and_reports_truncation(monkeypatch):
+    """D12 (W3): the QM path no longer goes through query_resources; it uses qm.query_members."""
+    seen = []
+
+    async def fake(project, type_name, where=None, limit=None):
+        seen.append({"type": type_name, "limit": limit})
+        return [{"uri": f"{BASE}/x/1", "title": "t"}], None, True
+
+    monkeypatch.setattr(qm, "query_members", fake)
+    result = await server.search_testcases("PROJ")
+    assert result == {"items": [{"uri": f"{BASE}/x/1", "title": "t"}], "truncated": True}
+    assert seen == [{"type": "TestCase", "limit": oslc.MAX_QUERY_LIMIT}]
 
 
 async def test_get_plan_items_uses_the_maximum_limit_and_reports_truncation(monkeypatch):

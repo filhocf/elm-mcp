@@ -7,6 +7,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+ETM reading and cross-domain links (SPEC-qm-leitura, SPEC-oslc-links, wave W3):
+
+- `list_qm_resources(project, type, query=None, limit=None)`: lists any of the 14 ETM types, one item per resource, with `total` from `oslc:totalCount`.
+- `get_qm_resource(uri)`: normalized properties and grouped links (`validates_requirement`, `tests_change_request`, scripts, results).
+- `get_test_coverage(project)`: requirements validated and work items tested, per test case.
+- `get_test_results(project, test_case=None)`: verdict (URI of the verdict resource) and `verdict_name` (its readable final fragment, e.g. `inconclusive`), points per status and originating execution record. Property names confirmed in live reading.
+- `link_artifacts(source_uri, target_uri, link_type)`: links a work item to an RM/QM artifact (13 `oslc_cm` types); partial PUT with `If-Match`, confirmed by re-reading. The write format is to be confirmed in live acceptance.
+- `unlink_artifacts(source_uri, target_uri, link_type)`: removes only that link, keeping the others.
+
 CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 - `add_comment(id, text)`: POSTs the comment as OSLC CM 1.0 (`application/x-oslc-cm-change-request+json`,
@@ -28,6 +37,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- `search_testcases` now returns the normalized ETM format: one item per test case `{uri, title, identifier, short_id, state, type}` plus `truncated` (D12: the TestCase capability is chosen by `oslc:resourceType`, RDF/XML only).
 - `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
   `oslc.where` (combined with `query` by `and`); a filter value with a quote, angle bracket or backslash is refused.
 - `list_workitems` now returns `{"items": [...], "truncated": bool}` instead of a list, follows `oslc:nextPage` up to `limit` items (default 50, max 1000) and re-authenticates once per page.
@@ -52,6 +62,8 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
   `reopen` work only where the workflow's action ids contain those words.
 
 ### Fixed
+
+- D12: `search_testcases` returned one `raw_xml` blob of the first query capability (TestExecutionRecord); it now picks the TestCase capability by `oslc:resourceType` and returns one item per test case.
 
 Live acceptance of W2 (read-only, ELM 7.0.1):
 

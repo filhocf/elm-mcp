@@ -175,6 +175,17 @@
       ]
     },
     {
+      "name": "get_qm_resource",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "uri",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "get_requirement",
       "read_only": true,
       "parameters": [
@@ -182,6 +193,34 @@
           "name": "uri",
           "type": "string",
           "required": true
+        }
+      ]
+    },
+    {
+      "name": "get_test_coverage",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "get_test_results",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "test_case",
+          "type": "null|string",
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -202,6 +241,27 @@
       "parameters": [
         {
           "name": "id",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "link_artifacts",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "source_uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
           "type": "string",
           "required": true
         }
@@ -290,6 +350,34 @@
           "name": "domain",
           "type": "string",
           "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_qm_resources",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "query",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "limit",
+          "type": "integer|null",
+          "required": false,
+          "default": null
         }
       ]
     },
@@ -438,6 +526,27 @@
         },
         {
           "name": "action",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "unlink_artifacts",
+      "read_only": false,
+      "parameters": [
+        {
+          "name": "source_uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "target_uri",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "link_type",
           "type": "string",
           "required": true
         }
