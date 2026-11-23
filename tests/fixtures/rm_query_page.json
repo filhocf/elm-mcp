@@ -1,0 +1,102 @@
+{
+ "https://elm.example.com/rm/resources/TX_ID001": {
+  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+   {
+    "type": "uri",
+    "value": "http://open-services.net/ns/rm#Requirement"
+   }
+  ],
+  "http://open-services.net/ns/core#instanceShape": [
+   {
+    "type": "uri",
+    "value": "https://elm.example.com/rm/types/OT_ID002"
+   }
+  ],
+  "http://purl.org/dc/terms/modified": [
+   {
+    "type": "literal",
+    "value": "2025-03-24T14:40:46.995Z",
+    "datatype": "http://www.w3.org/2001/XMLSchema#dateTime"
+   }
+  ],
+  "http://purl.org/dc/terms/identifier": [
+   {
+    "type": "literal",
+    "value": "353765",
+    "datatype": "http://www.w3.org/2001/XMLSchema#int"
+   }
+  ],
+  "http://purl.org/dc/terms/title": [
+   {
+    "type": "literal",
+    "value": "EL - Detalhar os dados do imóvel rural selecionado"
+   }
+  ]
+ },
+ "https://elm.example.com/rm/viewsnull": {
+  "http://www.w3.org/2000/01/rdf-schema#member": [
+   {
+    "type": "uri",
+    "value": "https://elm.example.com/rm/resources/TX_ID001"
+   },
+   {
+    "type": "uri",
+    "value": "https://elm.example.com/rm/resources/TX_ID003"
+   }
+  ]
+ },
+ "https://elm.example.com/rm/resources/TX_ID003": {
+  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+   {
+    "type": "uri",
+    "value": "http://open-services.net/ns/rm#Requirement"
+   }
+  ],
+  "http://open-services.net/ns/core#instanceShape": [
+   {
+    "type": "uri",
+    "value": "https://elm.example.com/rm/types/OT_ID004"
+   }
+  ],
+  "http://purl.org/dc/terms/modified": [
+   {
+    "type": "literal",
+    "value": "2026-11-05T12:25:27.729Z",
+    "datatype": "http://www.w3.org/2001/XMLSchema#dateTime"
+   }
+  ],
+  "http://purl.org/dc/terms/identifier": [
+   {
+    "type": "literal",
+    "value": "401876",
+    "datatype": "http://www.w3.org/2001/XMLSchema#int"
+   }
+  ],
+  "http://purl.org/dc/terms/title": [
+   {
+    "type": "literal",
+    "value": "REG - Situação 1: Imóvel Elegível para o benefício"
+   }
+  ]
+ },
+ "https://elm.example.com/rm/views?oslc.prefix=dcterms%3D%3Chttp%3A%2F%2Fpurl.org%2Fdc%2Fterms%2F%3E%2Coslc%3D%3Chttp%3A%2F%2Fopen-services.net%2Fns%2Fcore%23%3E&oslc.select=dcterms%3Atitle%2Cdcterms%3Aidentifier%2Cdcterms%3Amodified%2Coslc%3AinstanceShape&oslc.pageSize=2": {
+  "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+   {
+    "type": "uri",
+    "value": "http://open-services.net/ns/core#ResponseInfo"
+   }
+  ],
+  "http://open-services.net/ns/core#nextPage": [
+   {
+    "type": "uri",
+    "value": "https://elm.example.com/rm/views?oslc.prefix=dcterms%3D%3Chttp%3A%2F%2Fpurl.org%2Fdc%2Fterms%2F%3E%2Coslc%3D%3Chttp%3A%2F%2Fopen-services.net%2Fns%2Fcore%23%3E&oslc.select=dcterms%3Atitle%2Cdcterms%3Aidentifier%2Cdcterms%3Amodified%2Coslc%3AinstanceShape&oslc.pageSize=2&page=2"
+   }
+  ],
+  "http://purl.org/dc/terms/title": [
+   {
+    "type": "literal",
+    "value": "Query Results: 398"
+   }
+  ]
+ }
+}
