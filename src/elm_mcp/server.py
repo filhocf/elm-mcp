@@ -449,6 +449,20 @@ async def set_field(id: str, field: str, value: str) -> dict:
     return await oslc.set_field(id, field, value)
 
 
+@read_tool
+async def list_workflow(project: str, type: str) -> dict:
+    """List the workflow of a work item type: states (id, title, group) and action ids.
+
+    Args:
+        project: Project name
+        type: Type id, title or short alias (as in list_types / create_workitem)
+
+    Returns {"type", "workflow", "states": [{"id", "title", "group"}], "actions": [...]}.
+    The action ids are the values accepted by transition_workitem.
+    """
+    return await oslc.list_workflow(project, type)
+
+
 @tool
 async def create_requirement(
     project: str,

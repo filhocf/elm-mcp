@@ -1832,3 +1832,56 @@ async def set_field(id: str, field: str, value: str) -> dict:
     return {"id": id, "field": key, "value": written, "warnings": warnings}
 
 
+# ---------------------------------------------------------------------------------------------
+# list_workflow
+# ---------------------------------------------------------------------------------------------
+def _is_state_property(p: dict) -> bool:
+    return p["property_uri"] == "http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/state" or p["name"] == "state"
+
+
+async def list_workflow(project: str, type: str) -> dict:
+    """States (id, title, group) and action ids of the workflow of a work item type.
+
+    The workflow is read from the allowedValues of the type shape's state property
+    (/oslc/workflows/{pa}/states/{wf}); that this is where the real shape points is to be
+    confirmed in live acceptance.
+    """
+    project_url = await _resolve_project_url("ccm", project)
+    factory = _resolve_ccm_type(await _list_ccm_creation_factories(project_url), type)
+    if not factory["shape_uri"]:
+        raise ValueError(f"Type '{factory['title']}' has no resource shape: its workflow cannot be resolved.")
+    props = await list_shape_properties(factory["shape_uri"])
+    states_url = next(
+        (p["allowed_values_uri"] for p in props if _is_state_property(p) and p["allowed_values_uri"]), None
+    )
+    m = _WORKFLOW_STATES_RE.search(states_url or "")
+    if m is None:
+        raise ValueError(
+            f"Type '{factory['title']}' does not expose its workflow (no state property pointing at "
+            "/oslc/workflows/.../states/...)."
+        )
+    area, workflow = m.group(1), m.group(2)
+    client = await get_client()
+    states_resp = await fetch(client, "GET", states_url, "list_workflow", headers=_JSON_HEADERS)
+    actions_url = f"{settings.elm_url}/ccm/oslc/workflows/{area}/actions/{workflow}"
+    actions_resp = await fetch(client, "GET", actions_url, "list_workflow", headers=_JSON_HEADERS)
+    states = []
+    for s in _page_members(states_resp.json()):
+        if not isinstance(s, dict):
+            continue
+        about = s.get("rdf:about") or ""
+        states.append(
+            {
+                "id": s.get("dcterms:identifier") or (_last_segment(about) if about else None),
+                "title": s.get("dcterms:title"),
+                "group": s.get("rtc_cm:group"),
+            }
+        )
+    return {
+        "type": factory["title"],
+        "workflow": workflow,
+        "states": states,
+        "actions": _action_ids(actions_resp.json()),
+    }
+
+
