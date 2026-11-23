@@ -1,6 +1,6 @@
 # SPEC — QM write (escrita no ETM): casos, planos, suítes, scripts, vínculos
 
-**Status:** G0 feito (evidência de 16/nov e de leitura viva 23/nov); aceitação viva de ESCRITA pendente (escrita suspensa) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-oslc-links`
+**Status:** G4 (GREEN) implementado e verificado só por mocks (evidência de 16/nov e de leitura viva 23/nov); G5 e aceitação viva de ESCRITA pendentes (escrita suspensa) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-oslc-links`
 **Classe:** entregável de produto — fecha o ciclo RM→QM→CM
 
 ## Meta
