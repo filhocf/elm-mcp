@@ -186,7 +186,7 @@ async def test_create_resource_post_400():
     respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
         return_value=httpx.Response(400, text="Bad Request")
     )
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ValueError, match="HTTP 400"):
         await oslc.create_resource("ccm", "MY PROJECT (KEY)", {"dcterms:title": "X"})
 
 
@@ -196,7 +196,7 @@ async def test_create_resource_post_401():
     respx.post(f"{BASE}/ccm/oslc/contexts/_MWxBEJB7Ee-fe_bes9r78g/workitems").mock(
         return_value=httpx.Response(401, text="Unauthorized")
     )
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ValueError, match="sessao"):
         await oslc.create_resource("ccm", "MY PROJECT (KEY)", {"dcterms:title": "X"})
 
 
@@ -206,7 +206,7 @@ async def test_update_resource_put_409():
     uri = f"{BASE}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/99"
     respx.get(uri).mock(return_value=httpx.Response(200, json=CREATED_WI, headers={"ETag": '"e1"'}))
     respx.put(uri).mock(return_value=httpx.Response(409, text="Conflict"))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(ValueError, match="HTTP 409"):
         await oslc.update_resource(uri, {"dcterms:title": "X"})
 
 

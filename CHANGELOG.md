@@ -7,6 +7,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+W1 live-acceptance fixes (ELM 7.0.1):
+
+- `list_folders` returned the query/description resources and dropped the root folder. It now keeps only `nav#folder`
+  resources (root included) and returns `{"title", "uri", "subfolders_query"}`.
+- `get_requirement` failed with HTTP 415 on RM resources. It now retries with `application/rdf+xml` and returns a flat dict.
+- `update_requirement` returned `identifier: null`. It now re-reads the identifier (a failed re-read only adds a `warning`).
+
 CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 of slice F1):
 
 - **D1** `list_types("ccm")` returned property titles ("Children", "Verified"). It now lists one item per typed
@@ -31,11 +38,25 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
   changed properties (`?oslc.properties=...`) with `If-Match`, returns the re-read item, and reports a stale
   ETag (412) as a conflict.
 
+- **D3** `list_folders` failed with HTTP 400 because it queried folders by the component URI. It now queries by the project area URI announced by the service provider (`oslc:details`).
+- **D8** `create_requirement` returned `identifier: null` when the POST body was empty. It now re-reads the created artifact and returns the server's `dcterms:identifier`.
 - **D13** `create_workitem` without `filed_against` no longer sends a category (the server applies its own default) and
   no longer looks one up; a refusal about the category now adds a hint to use `list_fields` (property `filedAgainst`).
 
+### Added
+
+- Tool contract snapshot (`tests/contract/tools.snapshot.json`) with a network-free test; regenerate with `uv run python scripts/update_contract.py`. Tools now publish the MCP `readOnlyHint` annotation (read tools `true`, write tools `false`), so clients can tell them apart.
+- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
+
 ### Changed
 
+- **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
+- Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
+- The main reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached. A login answering 403 or 5xx now fails (`[credencial]` / `[http-<status>]`) instead of being accepted; three direct reads still do not re-authenticate (see `docs/roadmap.md`, "Dívida conhecida").
+- `list_folders` now raises "project area not advertised by the service provider" instead of returning `[]` when `oslc:details` is missing.
+- `create_requirement`: if the re-read of D8 fails after the POST, it no longer raises (the requirement exists): it returns the URI, the POST-body identifier (or `null`) and a `warning`, and logs a warning.
+- `delete_requirement`: a denied (401/403) confirmation read reports "deletion not confirmed" (the DELETE was sent); the DELETE is unconditional (no `If-Match`).
+- The contract snapshot grew: each parameter now records its `default` when it declares one; `scripts/update_contract.py` accepts an output path.
 - `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
   `reopen` work only where the workflow's action ids contain those words.
 

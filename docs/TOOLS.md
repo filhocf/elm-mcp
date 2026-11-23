@@ -10,7 +10,7 @@ See `docs/USAGE.md` for query syntax and examples.
 |------|-----------|-------------|
 | `list_projects`     | `(domain)` | List projects (service providers) for a domain. |
 | `search_requirements` | `(project, query=None)` | OSLC query over RM requirements (DOORS Next). |
-| `get_requirement`   | `(uri)` | Fetch a single requirement by its OSLC URI. |
+| `get_requirement`   | `(uri)` | Fetch a single requirement by its OSLC URI. RM answers HTTP 415 to JSON, so it falls back to `application/rdf+xml` and returns a flat dict (`rdf:about`, `prefix:name` -> text, XML string for `parseType="Literal"`, or URI; repeated properties become lists). |
 | `list_workitems`    | `(project, query=None)` | OSLC query over CCM work items; returns id/title/type/status/owner inline. |
 | `get_workitem`      | `(id)` | Fetch a single work item by ID. |
 | `search_testcases`  | `(project, query=None)` | OSLC query over QM test cases (ETM). |
@@ -27,14 +27,15 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `list_types`       | `(domain, project)` | List resource types available in a project area. `rm`/`qm`: `[{"title", "shape_uri", "resource_type"}]`. `ccm`: one item per work item type creation factory, `[{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]`; `id` is the type id used by `list_fields` and `create_workitem`. |
 | `list_fields`      | `(domain, project, type)` | List required/optional fields of a type, with `allowedValues` when the field is enumerated. `type` is a shape title from `list_types` (case-insensitive); for `ccm` it is the type `id` or `title` from `list_types`, or the alias `task`/`story`. Returns `{"type", "shape_uri", "required":[...], "optional":[...]}`; each field has `name`, `title`, `occurs` (e.g. `Exactly-one`), `read_only`, `property_uri`, `range_uri` and `allowed_values`. |
 | `inspect_workitem` | `(id)` | Read a real work item and derive its shape/factory URIs and filled fields. Returns `{"id", "type", "shape_uri", "factory_uri", "fields":{...}}`. Useful to learn a project area's concrete field values from an existing item. |
-| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project. Returns `[{"title", "uri"}]`. System folders (root, query results) are filtered out. |
+| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project (queried by the project area URI). Returns `[{"title", "uri", "subfolders_query"}]`: only real folders (`nav#folder`), including the root folder (a valid `folder` parent for `create_requirement`); `subfolders_query` is the URI of the child-folder query, or `null` (informational, not navigable yet). Fails with "project area not advertised by the service provider" when the project does not announce its project area (`oslc:details`). |
 
 ## Write (RM requirements)
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
-| `create_requirement` | `(project, title, content, folder=None, type=None)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is an `instanceShape` URI (from `list_types`). |
-| `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. |
+| `create_requirement` | `(project, title, content, folder=None, type=None)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is **required at runtime** (the schema keeps it optional so the refusal can list the valid types): a shape URI or a type title, both from `list_types("rm", project)`; without it (or with an unknown title) the call is refused listing the valid types. Returns `{"uri", "identifier"}` read back from the server; if that re-read fails after the POST, the requirement exists anyway and the result carries a short `warning` (do not create it again). |
+| `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. Returns `{"uri", "identifier"}`, the identifier re-read from the server (a failed re-read never raises; the result carries a `warning`). |
+| `delete_requirement` | `(uri)` | Delete a requirement via OSLC DELETE (direct mode, irreversible) and confirm by re-reading it (404 or 410). The DELETE is unconditional (no `If-Match`). Fails if it is still readable, and reports "deletion not confirmed" when the confirmation read is denied (401/403; the DELETE was sent). Returns `{"uri", "deleted": true}`. |
 
 ## Write (CCM work items)
 
@@ -45,14 +46,32 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `add_child_workitem`  | `(parent_id, title, type="task", description=None, owner=None, project=...)` | Create a work item linked as a child of `parent_id`. |
 | `transition_workitem` | `(id, action)` | Execute a workflow action on a work item (`PUT ?_action=<id>`) and re-read its state. `action` is the id of a workflow action, its id suffix (e.g. `a27`), or a unique case-insensitive substring of the id; `start`/`resolve`/`close`/`reopen` work only where the workflow's action ids contain those words. An unresolved or ambiguous `action` lists the available ids; an action that does not change the state is an error. Returns `Work item {id}: {from} -> {to} (action: {action id})`. |
 
+## Errors
+
+A failed HTTP call surfaces as a `ToolError` that starts with the gate that probably blocked it, then the
+status, the operation and the action to take. The main reads and all writes re-authenticate once on a 401 or on a 403
+without `oslc:message` before reporting (a few direct reads do not yet: see "Dívida conhecida" in `docs/roadmap.md`). A login that answers 403 or 5xx fails with `credencial` or `http-<status>`.
+
+| Gate | Status | Meaning / action |
+|---|---|---|
+| `credencial` | 401 at login | Invalid user or password: check `ELM_USER` / `ELM_PASSWORD`. |
+| `sessao` | 401 after login | Session expired and re-authentication did not help: retry. |
+| `regra-de-processo` | 403 with `oslc:message` | A process rule refused the write; the server message is repassed unchanged. |
+| `permissao` | 403 without message | Role, license or project area visibility insufficient. |
+| `recurso-inexistente-ou-invisivel` | 404 | The URI does not exist or the project area is not visible to the user. |
+| `conflito` | 412 | The resource changed since it was read: re-read and retry. |
+| `formato` | 406 | The server does not offer the format (QM only answers RDF/XML). |
+
+Other statuses are reported as `[http-<status>]` with the server message, if any. Credentials, cookies and
+the `Authorization` header never appear in the message.
+
 ## Notes
 
 - **Discover before you write.** `create_requirement`/`create_workitem` need shape and field values
   that vary per project area. Use `list_types` → `list_fields` (and `list_folders` for RM, or
   `inspect_workitem` to copy a real item's values) first. Nothing about a specific organization is
   baked into the package (see `docs/ARCHITECTURE.md`, core vs adaptation).
-- `create_requirement` takes an `instanceShape` URI in `type`. Resolve the title you want
-  (e.g. a requirement kind) to its `shape_uri` via `list_types` on the `rm` domain.
+- `create_requirement` requires `type`: pass the `shape_uri` or the title from `list_types` on the `rm` domain.
 - `create_workitem` currently supports `task` and `story`. Additional types (defect, technical debt,
   risk, impediment) are on the roadmap (`docs/specs/SPEC-wi-custom-types.md`).
 - `custom_fields` injects project-specific RDF attributes; values are discovered per project area
@@ -60,3 +79,13 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 - QM (ETM) is read-only through these tools; test-case write and cross-domain OSLC links
   (Implements Requirement / Tested By / Affects) are planned (`docs/specs/`, `docs/roadmap.md`).
 - State changes go through `transition_workitem` (workflow action), not `update_workitem`.
+
+## Flat dict from RDF/XML (`get_resource` on RM)
+
+`get_resource` asks for JSON first. The HTTP 415 fallback to `application/rdf+xml` applies **only to RM URIs** (path starting with `/rm/`); a 415 on any other URI (e.g. `/ccm/`) is reported as an error without a second call. The main `rdf:Description` is the one whose `rdf:about` equals the requested URI (else the first one). A malformed body, or one with a DTD/`<!ENTITY>`, raises `ValueError` (reported as a tool error).
+
+Limitations of the flat dict (lossy by design):
+
+- `rdf:nodeID` references and nested child nodes (a property whose value is an inline `rdf:Description`) are not preserved; such a property yields its text, usually empty.
+- `rdf:datatype` is dropped: typed literals come back as plain strings.
+- `rdf:parseType="Literal"` is returned as an XHTML string (`<div xmlns="http://www.w3.org/1999/xhtml">...</div>`) rebuilt from the parsed tree, not the original bytes (whitespace between attributes and namespace declarations may differ).

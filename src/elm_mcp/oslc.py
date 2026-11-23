@@ -1,17 +1,21 @@
 """OSLC service discovery and query builder for IBM ELM."""
 
 import html as _html
+import io
 import logging
 import re as _re
+from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as _xml_escape
 
 import httpx
 
-from .auth import get_client
+from .auth import _authenticate, get_client
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+_AUTH_FAIL_HEADER = "X-com-ibm-team-repository-web-auth-msg"
 
 # OSLC XML namespaces (ELM 7.x uses OSLC 1.0 namespaces in rootservices)
 NS = {
@@ -48,17 +52,116 @@ QUERY_RESOURCE_TYPE = {
 }
 
 
+def _server_message(resp: httpx.Response) -> str | None:
+    """Extract the server's oslc:message (JSON, or XML as a fallback) from an error response."""
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and isinstance(data.get("oslc:message"), str) and data["oslc:message"].strip():
+        return data["oslc:message"].strip()
+    try:
+        text = resp.text or ""
+    except ValueError:
+        return None
+    m = _re.search(r"<\w*:?message\b[^>]*>([^<]+)</\w*:?message>", text)
+    return m.group(1).strip() if m else None
+
+
+def diagnose_http_error(resp: httpx.Response, operation: str, uri: str) -> str:
+    """Name the gate that probably blocked an HTTP call and the action for the user.
+
+    The single diagnosis point for every read and write error (SPEC-diagnostico-gate).
+    The gate comes from the status alone; a server ``oslc:message`` is repassed verbatim.
+    Only the status, the operation, the URI and the server message are used: never the
+    password, cookies or the Authorization header.
+    """
+    status = resp.status_code
+    where = f"{operation} ({uri})"
+    message = _server_message(resp)
+    if status == 401 and (_AUTH_FAIL_HEADER in resp.headers or operation == "login"):
+        return (
+            f"[credencial] HTTP 401 on {where}: invalid ELM user or password. "
+            "Check ELM_USER and ELM_PASSWORD (and that the account is not locked)."
+        )
+    if status == 401:
+        return (
+            f"[sessao] HTTP 401 on {where}: the session expired and re-authentication did not help. "
+            "Retry the call; if it persists, check the ELM credentials."
+        )
+    if status == 403 and message:
+        return f"[regra-de-processo] HTTP 403 on {where}: {message}"
+    if status == 403:
+        return (
+            f"[permissao] HTTP 403 on {where}: the role, license or project area visibility is insufficient "
+            "(re-authenticated once). Ask for the proper role/permission on the project area."
+        )
+    if status == 404:
+        return (
+            f"[recurso-inexistente-ou-invisivel] HTTP 404 on {where}: the resource does not exist or the "
+            "project area is not visible to this user. Check the URI and the project area visibility."
+        )
+    if status == 412:
+        return (
+            f"[conflito] HTTP 412 on {where}: the resource was changed by someone else since it was read "
+            "(stale ETag). Re-read it and retry."
+        )
+    if status == 406:
+        return (
+            f"[formato] HTTP 406 on {where}: the server does not offer the requested format (QM only answers RDF/XML)."
+        )
+    suffix = f": {message}" if message else ""
+    return f"[http-{status}] HTTP {status} on {where}{suffix}"
+
+
+def _needs_reauth(resp: httpx.Response) -> bool:
+    """True for an expired session: 401, a login redirect, or a 403 without oslc:message (stale CSRF/session).
+
+    A 403 with oslc:message is a server business rule and must not be resent.
+    """
+    return (
+        resp.status_code == 401
+        or "j_security_check" in str(resp.headers.get("location", ""))
+        or (resp.status_code == 403 and _server_message(resp) is None)
+    )
+
+
+async def _request(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> httpx.Response:
+    """Send a request, re-authenticating ONCE when the session looks expired (see _needs_reauth)."""
+    send = getattr(client, method.lower())
+    resp = await send(url, **kwargs)
+    if _needs_reauth(resp):
+        # A 403 without oslc:message is treated as an expired session/CSRF and the request is resent
+        # once, writes included (decision: 403 refuses the write, covered by the F1 tests). Residual risk:
+        # if that 403 was a real refusal the write is sent twice; it is bounded to one resend and the
+        # second answer is the one reported.
+        await _authenticate(client)
+        resp = await send(url, **kwargs)
+    return resp
+
+
+def check_response(resp: httpx.Response, operation: str, uri: str) -> None:
+    """Raise ValueError (-> ToolError at the tool boundary) with the gate diagnosis for a non-2xx response."""
+    if not resp.is_success:
+        raise ValueError(diagnose_http_error(resp, operation, uri))
+
+
+async def fetch(client: httpx.AsyncClient, method: str, url: str, operation: str, **kwargs) -> httpx.Response:
+    """_request + check_response: the standard path of every HTTP call that must succeed."""
+    resp = await _request(client, method, url, **kwargs)
+    check_response(resp, operation, url)
+    return resp
+
+
 async def _get_xml(client: httpx.AsyncClient, url: str) -> ET.Element:
     """Fetch URL and parse as XML."""
-    resp = await client.get(url, headers={"Accept": "application/rdf+xml, application/xml"})
-    resp.raise_for_status()
+    resp = await fetch(client, "GET", url, "discovery", headers={"Accept": "application/rdf+xml, application/xml"})
     return ET.fromstring(resp.text)
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict:
     """Fetch URL as JSON (OSLC JSON response)."""
-    resp = await client.get(url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    resp.raise_for_status()
+    resp = await fetch(client, "GET", url, "read", headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
     return resp.json()
 
 
@@ -80,8 +183,13 @@ async def list_service_providers(domain: str) -> list[dict]:
 
     client = await get_client()
     catalog_url = await get_catalog_url(domain)
-    resp = await client.get(catalog_url, headers={"Accept": "application/rdf+xml, application/xml"})
-    resp.raise_for_status()
+    resp = await fetch(
+        client,
+        "GET",
+        catalog_url,
+        "list_projects",
+        headers={"Accept": "application/rdf+xml, application/xml"},
+    )
     xml_text = resp.text
     providers = []
 
@@ -133,11 +241,14 @@ async def _find_query_base(domain: str, project_url: str) -> str:
     else:
         urls_to_try = [project_url.replace("/services.xml", "/services"), project_url]
 
+    last_http_error: ValueError | None = None
     for url in urls_to_try:
         try:
             sp = await _get_xml(client, url)
-        except (httpx.HTTPError, ET.ParseError) as exc:
+        except (httpx.HTTPError, ValueError, ET.ParseError) as exc:
             logger.debug("OSLC discovery: skipping %s (%s)", url, exc)
+            if isinstance(exc, ValueError) and not isinstance(exc, ET.ParseError):
+                last_http_error = exc
             continue
         for qc in sp.iter(f"{{{NS['oslc']}}}QueryCapability"):
             rt_el = qc.find(f"{{{NS['oslc']}}}resourceType")
@@ -151,6 +262,8 @@ async def _find_query_base(domain: str, project_url: str) -> str:
             if qb is not None:
                 return qb.get(f"{{{NS['rdf']}}}resource")
 
+    if last_http_error is not None:
+        raise last_http_error
     raise ValueError(f"No query capability found for {domain} in project '{project_url}'")
 
 
@@ -191,19 +304,23 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
     else:
         url = query_base
 
-    resp = await client.get(
+    resp = await _request(
+        client,
+        "GET",
         url,
         params=params,
         headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
     )
     # Some domains (QM) don't support JSON — fallback to XML
     if resp.status_code == 406:
-        resp = await client.get(
+        resp = await fetch(
+            client,
+            "GET",
             url,
+            "query_resources",
             params=params,
             headers={"Accept": "application/xml", "OSLC-Core-Version": "2.0"},
         )
-        resp.raise_for_status()
         # Parse XML response into list of resource URIs
         from xml.etree import ElementTree as ET
 
@@ -218,16 +335,113 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
             results.append(entry)
         return results if results else [{"raw_xml": resp.text[:2000]}]
 
-    resp.raise_for_status()
+    check_response(resp, "query_resources", url)
     data = resp.json()
     # OSLC JSON responses have members in rdfs:member or oslc:results
     return data.get("oslc:results", data.get("rdfs:member", data.get("results", [data])))
 
 
+_XHTML_NS = "http://www.w3.org/1999/xhtml"
+
+
+def _qname(tag: str, prefixes: dict[str, str]) -> str:
+    """Prefixed name for an ElementTree ``{ns}local`` tag, using the prefixes seen in the document."""
+    ns_uri, _, local = tag[1:].partition("}") if tag.startswith("{") else ("", "", tag)
+    prefix = prefixes.get(ns_uri, "")
+    return f"{prefix}:{local}" if prefix else local
+
+
+def _child_to_xml(child: ET.Element) -> str:
+    """Serialize one element with the stdlib writer; XHTML keeps a default ``xmlns`` (no ``ns0:`` prefixes)."""
+    try:
+        return ET.tostring(child, encoding="unicode", default_namespace=_XHTML_NS, short_empty_elements=True)
+    except ValueError:  # content outside the XHTML namespace: use the standard prefixed output
+        return ET.tostring(child, encoding="unicode", short_empty_elements=True)
+
+
+def _serialize_literal(prop: ET.Element) -> str:
+    """Serialize the content of a ``rdf:parseType="Literal"`` element from the already parsed tree.
+
+    Uses ``ET.tostring`` per child; text and tails are XML-escaped, so empty elements,
+    namespaces and ``xml:lang`` come out as well-formed XML. Excessive nesting raises ``ValueError``.
+    """
+    try:
+        parts = [_xml_escape(prop.text or "")]
+        for child in prop:
+            parts.append(_child_to_xml(child))
+            parts.append(_xml_escape(child.tail or ""))
+    except RecursionError as exc:
+        raise ValueError("invalid RDF/XML response: nesting too deep") from exc
+    return "".join(parts).strip()
+
+
+def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
+    """Flatten the main rdf:Description of an RDF/XML document into a plain dict.
+
+    Keys are ``rdf:about`` plus ``prefix:name`` for every property (prefixes as declared in the document).
+    Values are text (literal), the inner XML as a string (``rdf:parseType="Literal"``) or a URI
+    (``rdf:resource``); a repeated property becomes a list. The main Description is the one whose
+    ``rdf:about`` equals ``uri``, else the first one. Malformed XML or a DTD/entity declaration raises
+    ``ValueError`` (legitimate OSLC responses carry no DTD).
+    """
+    if "<!DOCTYPE" in xml_text or "<!ENTITY" in xml_text:
+        raise ValueError("invalid RDF/XML response: DTD/entity declarations are not accepted")
+    prefixes: dict[str, str] = {}
+    root = None
+    try:
+        for event, item in ET.iterparse(io.StringIO(xml_text), events=("start-ns", "end")):
+            if event == "start-ns":
+                prefix, ns_uri = item
+                prefixes.setdefault(ns_uri, prefix)
+            else:
+                root = item
+    except ET.ParseError as exc:
+        raise ValueError(f"invalid RDF/XML response: {exc}") from exc
+    rdf_ns = NS["rdf"]
+    if root is not None and root.tag == f"{{{rdf_ns}}}Description":
+        descriptions = [root]
+    else:
+        descriptions = list(root) if root is not None else []
+    main = next((d for d in descriptions if d.get(f"{{{rdf_ns}}}about") == uri), None)
+    if main is None and descriptions:
+        main = descriptions[0]
+    result: dict = {}
+    if main is None:
+        return result
+    result["rdf:about"] = main.get(f"{{{rdf_ns}}}about", uri)
+    for prop in main:
+        key = _qname(prop.tag, prefixes)
+        if prop.get(f"{{{rdf_ns}}}resource") is not None:
+            value = prop.get(f"{{{rdf_ns}}}resource")
+        elif prop.get(f"{{{rdf_ns}}}parseType") == "Literal":
+            value = _serialize_literal(prop)
+        else:
+            value = prop.text or ""
+        if key in result:
+            if not isinstance(result[key], list):
+                result[key] = [result[key]]
+            result[key].append(value)
+        else:
+            result[key] = value
+    return result
+
+
 async def get_resource(uri: str) -> dict:
-    """Fetch a single OSLC resource by URI."""
+    """Fetch a single OSLC resource by URI.
+
+    Asks for JSON. RM resources (URI path starting with ``/rm/``) answer HTTP 415 to JSON: in that
+    case the request is repeated with ``application/rdf+xml`` and the RDF/XML is flattened to a dict
+    (see _rdfxml_to_flat_dict). Other resources (e.g. CCM) never get the fallback.
+    """
     client = await get_client()
-    return await _get_json(client, uri)
+    resp = await _request(client, "GET", uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+    if resp.status_code == 415 and urlparse(uri).path.startswith("/rm/"):
+        resp = await fetch(
+            client, "GET", uri, "read", headers={"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
+        )
+        return _rdfxml_to_flat_dict(resp.text, uri)
+    check_response(resp, "read", uri)
+    return resp.json()
 
 
 async def _find_current_iteration(project_url: str) -> str | None:
@@ -242,11 +456,13 @@ async def _find_current_iteration(project_url: str) -> str | None:
     project_area_id = parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
     iterations_url = f"{settings.elm_url}/ccm/oslc/iterations?projectArea={project_area_id}"
     try:
-        resp = await client.get(
+        resp = await fetch(
+            client,
+            "GET",
             iterations_url,
+            "find_current_iteration",
             headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
         )
-        resp.raise_for_status()
         members = resp.json().get("oslc:results", [])
         now = datetime.now(timezone.utc)
         candidates = []  # (uri, start_dt, has_end)
@@ -314,32 +530,17 @@ def _project_area_id(project_url: str) -> str:
     return parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
 
 
-def _write_message(resp: httpx.Response) -> str | None:
-    """Extract the server's oslc:message (JSON, or XML as a fallback) from a refused write."""
-    try:
-        data = resp.json()
-    except ValueError:
-        data = None
-    if isinstance(data, dict) and isinstance(data.get("oslc:message"), str) and data["oslc:message"].strip():
-        return data["oslc:message"].strip()
-    m = _re.search(r"<\w*:?message\b[^>]*>([^<]+)</\w*:?message>", resp.text or "")
-    return m.group(1).strip() if m else None
+def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
+    """Raise a readable ValueError naming the gate for a refused write.
 
-
-def _raise_write_error(resp: httpx.Response) -> None:
-    """Raise a readable ValueError for a refused write that carries an oslc:message.
-
-    The @tool boundary only translates ValueError/RuntimeError, so the server's message
-    must leave this module as one of them. Without a message, falls back to the HTTP error.
+    The @tool boundary only translates ValueError/RuntimeError, so the diagnosis must leave
+    this module as one of them. The server's oslc:message is kept verbatim by diagnose_http_error.
     """
-    message = _write_message(resp)
-    if message:
-        hint = ""
-        if _re.search(r"filed\s*against|categor", message, _re.IGNORECASE):
-            hint = " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
-        raise ValueError(f"Server refused the write ({resp.status_code}): {message}{hint}")
-    resp.raise_for_status()
-    raise RuntimeError(f"Unexpected response status {resp.status_code}")
+    message = diagnose_http_error(resp, operation, uri)
+    server_message = _server_message(resp)
+    if server_message and _re.search(r"filed\s*against|categor", server_message, _re.IGNORECASE):
+        message += " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
+    raise ValueError(message)
 
 
 # CCM type aliases accepted by create_workitem/list_fields. Any other type must come from list_types.
@@ -390,21 +591,13 @@ async def create_resource(domain: str, project: str, payload: dict, wi_type: str
         "Accept": "application/json",
         "OSLC-Core-Version": "2.0",
     }
-    resp = await client.post(creation_url, content=rdfxml_body, headers=post_headers)
-    # Re-authenticate (once) on an expired session: 401, login redirect, or a 403 without
-    # oslc:message (stale CSRF/session). A 403 with oslc:message is the server's business rule
-    # and must not be resent.
-    if (
-        resp.status_code == 401
-        or "j_security_check" in str(resp.headers.get("location", ""))
-        or (resp.status_code == 403 and _write_message(resp) is None)
-    ):
-        from .auth import _authenticate
-
-        await _authenticate(client)
-        resp = await client.post(creation_url, content=rdfxml_body, headers=post_headers)
+    # Re-authenticates once on an expired session (see _needs_reauth); a 403 with oslc:message
+    # is the server's business rule and is not resent.
+    resp = await _request(client, "POST", creation_url, content=rdfxml_body, headers=post_headers)
     if resp.status_code != 201:
-        _raise_write_error(resp)
+        if resp.is_success:
+            raise RuntimeError(f"Expected 201 Created, got {resp.status_code}")
+        _raise_write_error(resp, "create_workitem", creation_url)
     return resp.json()
 
 
@@ -416,8 +609,9 @@ async def update_resource(uri: str, payload: dict) -> dict:
     """
     client = await get_client()
     # GET to obtain the ETag (and the prefix map, reused so custom prefixes resolve)
-    get_resp = await client.get(uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    get_resp.raise_for_status()
+    get_resp = await fetch(
+        client, "GET", uri, "update_workitem", headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    )
     etag = get_resp.headers.get("ETag", "")
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely update.")
@@ -425,7 +619,9 @@ async def update_resource(uri: str, payload: dict) -> dict:
     prefixes = get_resp.json().get("prefixes")
     if isinstance(prefixes, dict):
         body["prefixes"] = prefixes
-    resp = await client.put(
+    resp = await _request(
+        client,
+        "PUT",
         uri,
         params={"oslc.properties": ",".join(payload)},
         json=body,
@@ -436,18 +632,14 @@ async def update_resource(uri: str, payload: dict) -> dict:
             "If-Match": etag,
         },
     )
-    _check_put(resp)
+    _check_put(resp, "update_workitem", uri)
     return await _get_json(client, uri)
 
 
-def _check_put(resp: httpx.Response) -> None:
-    """Map a refused conditional PUT to a readable error (412 = ETag conflict)."""
-    if resp.status_code == 412:
-        raise ValueError(
-            "Conflict: the item was changed by someone else since it was read (stale ETag); re-read it and try again."
-        )
+def _check_put(resp: httpx.Response, operation: str, uri: str) -> None:
+    """Map a refused conditional PUT to a readable error naming the gate (412 = conflito)."""
     if resp.status_code >= 400:
-        _raise_write_error(resp)
+        _raise_write_error(resp, operation, uri)
 
 
 _STATE_URI_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/]+)/([^/?#]+)$")
@@ -538,8 +730,7 @@ async def transition_workitem(item_uri: str, action: str) -> dict:
     """
     client = await get_client()
     json_headers = {"Accept": "application/json", "OSLC-Core-Version": "2.0"}
-    get_resp = await client.get(item_uri, headers=json_headers)
-    get_resp.raise_for_status()
+    get_resp = await fetch(client, "GET", item_uri, "transition_workitem", headers=json_headers)
     etag = get_resp.headers.get("ETag", "")
     if not etag:
         raise ValueError(f"Server did not return an ETag for work item '{item_uri}'. Cannot safely transition.")
@@ -554,17 +745,20 @@ async def transition_workitem(item_uri: str, action: str) -> dict:
         raise ValueError("The work item has no dcterms:title; cannot execute the transition.")
 
     workflows = f"{settings.elm_url}/ccm/oslc/workflows/{area}"
-    actions_resp = await client.get(f"{workflows}/actions/{workflow}", headers=json_headers)
-    actions_resp.raise_for_status()
+    actions_resp = await fetch(
+        client, "GET", f"{workflows}/actions/{workflow}", "transition_workitem", headers=json_headers
+    )
     action_id = _resolve_workflow_action(action, _action_ids(actions_resp.json()))
 
-    resp = await client.put(
+    resp = await _request(
+        client,
+        "PUT",
         item_uri,
         params={"_action": action_id, "oslc.properties": "dcterms:title"},
         json={"dcterms:title": title},
         headers={**json_headers, "Content-Type": "application/json", "If-Match": etag},
     )
-    _check_put(resp)
+    _check_put(resp, "transition_workitem", item_uri)
 
     after = await _get_json(client, item_uri)
     after_uri = _item_state_uri(after)
@@ -642,13 +836,7 @@ async def _find_requirement_factory(project_url: str) -> str:
     whose oslc:resourceType is rm#Requirement and returns its oslc:creation URI.
     Uses regex (not ElementTree) — ET fails in the MCP stdio context.
     """
-    client = await get_client()
-    resp = await client.get(
-        project_url,
-        headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
-    )
-    resp.raise_for_status()
-    xml_text = resp.text
+    xml_text = await _get_xml_text(project_url)
 
     # Match each CreationFactory block, then pick the one whose resourceType is
     # EXACTLY rm#Requirement — not a substring match, which would also accept
@@ -723,14 +911,17 @@ async def create_requirement(
 ) -> dict:
     """Create an RM requirement via OSLC POST to the requirementFactory.
 
-    Resolves the project, discovers the factory, sanitizes nothing here (the
-    caller passes already-sanitized XHTML), builds the RDF/XML, and POSTs it
-    (Accept/Content-Type application/rdf+xml). Accepts 200 or 201. Retries once
-    on 401/403 after a session refresh (same pattern as create_resource).
-    Returns {"uri": ..., "identifier": ...}. Raises ValueError if the project
-    does not exist (propagated from _resolve_project_url).
+    Resolves the project, requires and resolves ``shape`` (URI or type title, D7),
+    discovers the factory, sanitizes nothing here (the caller passes already-sanitized
+    XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
+    Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
+    Returns {"uri": ..., "identifier": ...}, the identifier re-read from the server (D8). If the re-read
+    fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier (or
+    None) and a short ``warning`` key, and logs a warning.
+    Raises ValueError if the project does not exist or the type is missing/unknown.
     """
     project_url = await _resolve_project_url("rm", project)
+    shape = await _resolve_requirement_shape(project, shape)
     factory_url = await _find_requirement_factory(project_url)
     _assert_xhtml_wellformed(xhtml)
     rdf_body = _requirement_to_rdfxml(title, xhtml, shape=shape, folder=folder)
@@ -740,18 +931,79 @@ async def create_requirement(
         "Accept": "application/rdf+xml",
         "OSLC-Core-Version": "2.0",
     }
-    resp = await client.post(factory_url, content=rdf_body.encode("utf-8"), headers=post_headers)
-    if resp.status_code in (401, 403) or "j_security_check" in str(resp.headers.get("location", "")):
-        from .auth import _authenticate
-
-        await _authenticate(client)
-        resp = await client.post(factory_url, content=rdf_body.encode("utf-8"), headers=post_headers)
+    resp = await _request(client, "POST", factory_url, content=rdf_body.encode("utf-8"), headers=post_headers)
     if resp.status_code not in (200, 201):
-        resp.raise_for_status()
-        raise RuntimeError(f"Expected 200/201 Created, got {resp.status_code}")
+        if resp.is_success:
+            raise RuntimeError(f"Expected 200/201 Created, got {resp.status_code}")
+        _raise_write_error(resp, "create_requirement", factory_url)
     location = resp.headers.get("Location", "")
     identifier = _extract_identifier(resp.text)
-    return {"uri": location, "identifier": identifier}
+    result: dict = {"uri": location, "identifier": identifier}
+    if location:
+        # The POST body can be empty: read the identifier back from the created artifact (D8).
+        # The requirement ALREADY exists here, so a failed re-read must never propagate (the caller
+        # would retry the POST and create a duplicate): fall back to the POST body and warn.
+        try:
+            reread = await fetch(
+                client,
+                "GET",
+                location,
+                "create_requirement",
+                headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
+            )
+            result["identifier"] = _extract_identifier(reread.text) or identifier
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            logger.warning("create_requirement: created %s but the re-read failed (%s)", location, exc)
+            result["warning"] = (
+                "Requirement created, but re-reading it failed; the identifier may be missing. Do NOT create it again."
+            )
+    return result
+
+
+async def _resolve_requirement_shape(project: str, type_arg: str | None) -> str:
+    """Resolve the required RM type (D7) to a shape URI.
+
+    ``type_arg`` is a shape URI (used as is) or a type title matched case-insensitively
+    against list_types("rm"). Without a type, or with an unknown title, raises ValueError
+    listing the available types (the POST is never sent).
+    """
+    wanted = (type_arg or "").strip()
+    if wanted.lower().startswith(("http://", "https://")):
+        return wanted
+    shapes = await list_resource_shapes("rm", project)
+    if wanted:
+        match = next((sh for sh in shapes if (sh["title"] or "").lower() == wanted.lower()), None)
+        if match is not None:
+            return match["shape_uri"]
+    available = ", ".join(f"{sh['title']} ({sh['shape_uri']})" for sh in shapes) or "none found"
+    reason = f"Unknown type '{wanted}'" if wanted else "'type' is required"
+    raise ValueError(f"{reason} for create_requirement. Available RM types (see list_types): {available}")
+
+
+async def delete_requirement(uri: str) -> dict:
+    """DELETE an RM requirement (direct mode) and confirm by re-reading it (404 or 410).
+
+    The DELETE is unconditional (no If-Match): it removes whatever version exists. Raises ValueError
+    when the DELETE is refused (gate named), when the artifact is still readable afterwards, or when
+    the confirmation GET is denied (401/403: the DELETE was sent, the deletion is NOT confirmed).
+    Returns {"uri", "deleted": True}.
+    """
+    client = await get_client()
+    resp = await _request(client, "DELETE", uri, headers={"OSLC-Core-Version": "2.0"})
+    if not resp.is_success:
+        _raise_write_error(resp, "delete_requirement", uri)
+    check = await _request(client, "GET", uri, headers={"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"})
+    if check.status_code in (404, 410):
+        return {"uri": uri, "deleted": True}
+    if check.is_success:
+        raise ValueError(f"DELETE was accepted but the requirement is still readable: {uri}")
+    if check.status_code in (401, 403):
+        raise ValueError(
+            f"Deletion not confirmed: the DELETE was sent but the confirmation read of {uri} was denied "
+            f"(HTTP {check.status_code}). Check whether the requirement still exists."
+        )
+    check_response(check, "delete_requirement", uri)
+    raise ValueError(f"Could not confirm the deletion of {uri}")
 
 
 async def update_requirement(uri: str, title: str | None = None, xhtml: str | None = None) -> dict:
@@ -763,10 +1015,13 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
     an ETag conflict (the @tool boundary converts it to a legible ToolError).
     """
     client = await get_client()
-    get_resp = await client.get(
-        uri, headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"}
+    get_resp = await fetch(
+        client,
+        "GET",
+        uri,
+        "update_requirement",
+        headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
     )
-    get_resp.raise_for_status()
     etag = get_resp.headers.get("ETag", "")
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely update.")
@@ -817,7 +1072,9 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
 
     xml_content = xml_content[: m.start()] + open_tag + body + close_tag + xml_content[m.end() :]
 
-    put_resp = await client.put(
+    put_resp = await _request(
+        client,
+        "PUT",
         uri,
         content=xml_content.encode("utf-8"),
         headers={
@@ -827,12 +1084,25 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
             "If-Match": etag,
         },
     )
-    if put_resp.status_code == 412:
-        raise ValueError("conflito de ETag: o requisito foi alterado por outro cliente; recarregue e tente novamente")
     if put_resp.status_code not in (200, 204):
-        put_resp.raise_for_status()
-        raise RuntimeError(f"Expected 200/204, got {put_resp.status_code}")
-    return {"uri": uri, "identifier": _extract_identifier(put_resp.text)}
+        if put_resp.is_success:
+            raise RuntimeError(f"Expected 200/204, got {put_resp.status_code}")
+        _raise_write_error(put_resp, "update_requirement", uri)
+    result: dict = {"uri": uri, "identifier": _extract_identifier(put_resp.text)}
+    # The PUT already succeeded: a failed re-read must never propagate (same rule as create_requirement).
+    try:
+        reread = await fetch(
+            client,
+            "GET",
+            uri,
+            "update_requirement",
+            headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
+        )
+        result["identifier"] = _extract_identifier(reread.text) or result["identifier"]
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("update_requirement: updated %s but the re-read failed (%s)", uri, exc)
+        result["warning"] = "Requirement updated, but re-reading it failed; the identifier may be missing."
+    return result
 
 
 # =====================================================================
@@ -846,8 +1116,9 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
 NS["oslc_config"] = "http://open-services.net/ns/config#"
 NS["public_rm"] = "http://jazz.net/xmlns/rm/public/1.0/"
 
-# System folders filtered out of list_folders — tenant-neutral (no org string).
-_SYSTEM_FOLDER_TITLES = {"root", "Folder Query Results"}
+_RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+_NAV_FOLDER_TYPE = "http://jazz.net/ns/rm/navigation#folder"
+_NAV_SUBFOLDERS = "http://jazz.net/ns/rm/navigation#subfolders"
 
 
 def _shape_title(xml_text: str) -> str | None:
@@ -865,11 +1136,13 @@ def _shape_title(xml_text: str) -> str | None:
 async def _get_xml_text(url: str) -> str:
     """GET a URL as rdf+xml/xml text (shared by the discovery helpers)."""
     client = await get_client()
-    resp = await client.get(
+    resp = await fetch(
+        client,
+        "GET",
         url,
+        "discovery",
         headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
     )
-    resp.raise_for_status()
     return resp.text
 
 
@@ -879,11 +1152,15 @@ async def _fetch_service_xml(project_url: str) -> str:
         candidates = [project_url, project_url.replace("/services.xml", "/services")]
     else:
         candidates = [project_url.rstrip("/") + "/services", project_url]
+    last_error: Exception | None = None
     for url in candidates:
         try:
             return await _get_xml_text(url)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.debug("OSLC discovery: skipping %s (%s)", url, exc)
+            last_error = exc
+    if isinstance(last_error, ValueError):
+        raise last_error
     raise ValueError(f"Could not read the service provider document for '{project_url}'")
 
 
@@ -1124,12 +1401,7 @@ async def inspect_workitem(id: str) -> dict:
     Returns {"id","type","shape_uri","factory_uri","fields":{...}}.
     """
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
-    try:
-        data = await get_resource(uri)
-    except httpx.HTTPStatusError as exc:
-        # Surface a legible domain error (e.g. 404) through the @tool boundary,
-        # which translates ValueError/RuntimeError into ToolError.
-        raise ValueError(f"work item '{id}' not found ({exc.response.status_code})") from exc
+    data = await get_resource(uri)  # a refused read raises ValueError naming the gate
 
     shape = data.get("oslc:instanceShape")
     shape_uri = shape.get("rdf:resource") if isinstance(shape, dict) else None
@@ -1156,35 +1428,46 @@ async def inspect_workitem(id: str) -> dict:
 async def list_folders(project: str) -> list[dict]:
     """List RM (DOORS Next) folders for a project.
 
-    Resolves the RM service provider, reads it as rdf+xml to extract the
-    oslc_config:component URI, then GETs /rm/folders?oslc.where=public_rm:parent=
-    <component> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
-    System folders (root, Folder Query Results) are filtered (tenant-neutral).
-    Degrades to [] when the service provider exposes no component.
-    Returns [{"title","uri"}].
+    Resolves the RM service provider, reads it as rdf+xml to extract the project
+    area URI (oslc:details), then GETs /rm/folders?oslc.where=public_rm:parent=
+    <project area> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
+    (The component URI is rejected by the server with a 400: D3.)
+    Only resources typed nav#folder are returned (query/description resources are dropped);
+    the root folder is included because it is a valid parent for create_requirement(folder=...).
+    Raises ValueError when the service provider announces no project area (no oslc:details).
+    Returns [{"title","uri","subfolders_query"}] (subfolders_query is a URI or None; not navigable yet).
     """
     project_url = await _resolve_project_url("rm", project)
     sp_xml = await _get_xml_text(project_url)
-    comp_m = _re.search(r"<\w*:?component\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
-    if comp_m is None:
-        return []
-    component_uri = comp_m.group(1)
+    area_m = _re.search(r"<\w*:?details\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
+    if area_m is None:
+        raise ValueError(
+            f"project area not advertised by the service provider ({project_url}): "
+            "the folders cannot be queried (no oslc:details)."
+        )
+    project_area_uri = area_m.group(1)
 
     client = await get_client()
     folders_url = f"{settings.elm_url}/rm/folders"
-    resp = await client.get(
+    resp = await fetch(
+        client,
+        "GET",
         folders_url,
-        params={"oslc.where": f"public_rm:parent={component_uri}"},
+        "list_folders",
+        params={"oslc.where": f"public_rm:parent={project_area_uri}"},
         headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
     )
-    resp.raise_for_status()
     data = resp.json()
 
     folders: list[dict] = []
     for folder_uri, props in data.items():
+        # Keep only real folders (nav#folder): the query answer also carries a ResponseInfo
+        # and a nav#Description resource. The root folder is kept: it is a valid parent.
+        types = [t.get("value") for t in props.get(_RDF_TYPE, []) if isinstance(t, dict)]
+        if _NAV_FOLDER_TYPE not in types:
+            continue
         title_entries = props.get("http://purl.org/dc/terms/title", [])
         title = title_entries[0].get("value") if title_entries else None
-        if title in _SYSTEM_FOLDER_TITLES:
-            continue
-        folders.append({"title": title, "uri": folder_uri})
+        sub = props.get(_NAV_SUBFOLDERS, [])
+        folders.append({"title": title, "uri": folder_uri, "subfolders_query": sub[0].get("value") if sub else None})
     return folders

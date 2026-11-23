@@ -73,3 +73,8 @@ Fora da v0.6.0: F8/JRS (bloqueio de permissão REST no ELM; pedido de acesso ao 
 
 Cada onda fecha com: CHANGELOG, `docs/TOOLS.md`, cabeçalho Status da SPEC e `AGENTS.md` (contagem de tools) no mesmo PR.
 Publicação (merge de release, tag `v*`, PyPI, GitHub Release) só como **draft** até OK do Claudio.
+## Dívida conhecida
+
+- Três leituras diretas via `client.get` não reautenticam em sessão expirada (as demais passam por `_request`): `server.py` (~139, detalhe de iteração), `oslc.py` (~374, iteração) e `oslc.py` (~604, estados do workflow). Migrar para `fetch`/`_request`.
+- Em `_needs_reauth`, o teste de `j_security_check` no cabeçalho `Location` está sem cobertura real de redirecionamento de login (com `follow_redirects=True` o cliente raramente o vê); revisar se ainda é alcançável.
+- O reenvio do POST/PUT num 403 sem `oslc:message` é deliberado (decisão do gerente); risco residual: uma recusa real é enviada duas vezes.

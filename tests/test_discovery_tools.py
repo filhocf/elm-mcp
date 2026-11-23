@@ -32,7 +32,7 @@ the RED test pins a concrete, realistic degrade behavior — revisit at G4 revie
       allowed_values == [] (empty), key present, does not break. (G0 §7 case 8.)
   A3. inspect_workitem with NO oslc:instanceShape -> shape_uri is None and
       factory_uri is None (degrades, does not raise). (G0 §7 case 14.)
-  A4. list_folders when the service provider has NO oslc_config:component
+  A4. list_folders when the service provider has NO project area (oslc:details)
       -> returns [] (empty list), does NOT raise. (G0 §7 case 17.)
   A5. list_fields resolves `type` by title with case-insensitive equality;
       an unknown title raises ValueError -> ToolError at the @tool boundary.
@@ -292,6 +292,7 @@ WI_JSON_NO_SHAPE = {
 
 # ---- list_folders fixtures ----
 RM_COMPONENT_URI = f"{BASE}/rm/cm/component/_compA"
+RM_PROJECT_AREA_URI = f"{BASE}/process/project-areas/_PA1"
 FOLDERS_URL = f"{BASE}/rm/folders"
 
 # RM service provider rdf+xml exposing oslc_config:component. Varied prefix.
@@ -301,6 +302,7 @@ RM_SP_WITH_COMPONENT_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
     xmlns:oslc="http://open-services.net/ns/core#"
     xmlns:oslc_config="http://open-services.net/ns/config#">
     <oslc:ServiceProvider>
+        <oslc:details rdf:resource="{RM_PROJECT_AREA_URI}"/>
         <oslc_config:component rdf:resource="{RM_COMPONENT_URI}"/>
     </oslc:ServiceProvider>
 </rdf:RDF>
@@ -314,19 +316,34 @@ RM_SP_NO_COMPONENT_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </rdf:RDF>
 """
 
-# Folders JSON: {uri: {dcterms:title: [{value: name}]}} incl. system folders.
+# Folders JSON as the real server answers it: root folder, folders, the query resource and a nav#Description.
 FOLDERS_JSON = {
-    f"{BASE}/rm/folders/_root": {
-        "http://purl.org/dc/terms/title": [{"value": "root"}],
+    f"{BASE}/rm/folders/FR_ROOT": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#folder"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "root"}],
+        "http://jazz.net/ns/rm/navigation#subfolders": [
+            {"type": "uri", "value": f"{BASE}/rm/folders?oslc.where=public_rm:parent={BASE}/rm/folders/FR_ROOT"}
+        ],
     },
-    f"{BASE}/rm/folders/_queryres": {
-        "http://purl.org/dc/terms/title": [{"value": "Folder Query Results"}],
+    f"{BASE}/rm/folders/FR_REQS": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#folder"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "Requirements"}],
     },
-    f"{BASE}/rm/folders/_reqs": {
-        "http://purl.org/dc/terms/title": [{"value": "Requirements"}],
+    f"{BASE}/rm/folders?oslc.where=public_rm:parent={BASE}/process/project-areas/_PA1": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://open-services.net/ns/core#ResponseInfo"}
+        ],
+        "http://purl.org/dc/terms/title": [{"type": "literal", "value": "Folder Query Results: 2"}],
     },
-    f"{BASE}/rm/folders/_designs": {
-        "http://purl.org/dc/terms/title": [{"value": "Designs"}],
+    f"{BASE}/rm/folders": {
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": [
+            {"type": "uri", "value": "http://jazz.net/ns/rm/navigation#Description"}
+        ],
+        "http://www.w3.org/2000/01/rdf-schema#member": [{"type": "uri", "value": f"{BASE}/rm/folders/FR_ROOT"}],
     },
 }
 
@@ -540,34 +557,34 @@ async def test_inspect_workitem_no_instance_shape_degrades():
 # ======================================================================
 @respx.mock
 async def test_list_folders_returns_titles_and_uris():
-    """15. SP->component->folders JSON; non-system folders have title + uri."""
+    """15. SP->project area->folders JSON; each folder has title + uri + subfolders_query."""
     _mock_rm_discovery(services_xml=RM_SP_WITH_COMPONENT_XML)
-    respx.get(FOLDERS_URL).mock(return_value=httpx.Response(200, json=FOLDERS_JSON))
+    folders_route = respx.get(FOLDERS_URL).mock(return_value=httpx.Response(200, json=FOLDERS_JSON))
     result = await list_folders("PROJ")
-    titles = {f["title"] for f in result}
-    assert "Requirements" in titles
-    assert "Designs" in titles
+    # W1/D3: the parent is the project area (oslc:details), not the component.
+    assert folders_route.calls[0].request.url.params["oslc.where"] == f"public_rm:parent={RM_PROJECT_AREA_URI}"
     reqs = next(f for f in result if f["title"] == "Requirements")
-    assert reqs["uri"] == f"{BASE}/rm/folders/_reqs"
+    assert reqs == {"title": "Requirements", "uri": f"{BASE}/rm/folders/FR_REQS", "subfolders_query": None}
 
 
 @respx.mock
-async def test_list_folders_filters_system_folders():
-    """16. 'root' and 'Folder Query Results' excluded (A6, tenant-neutral)."""
+async def test_list_folders_keeps_only_nav_folders_and_includes_root():
+    """16. Only nav#folder resources are returned; the root folder is a valid parent and is kept."""
     _mock_rm_discovery(services_xml=RM_SP_WITH_COMPONENT_XML)
     respx.get(FOLDERS_URL).mock(return_value=httpx.Response(200, json=FOLDERS_JSON))
     result = await list_folders("PROJ")
-    titles = {f["title"] for f in result}
-    assert "root" not in titles
-    assert "Folder Query Results" not in titles
+    assert {f["title"] for f in result} == {"root", "Requirements"}
+    root = next(f for f in result if f["title"] == "root")
+    assert root["uri"] == f"{BASE}/rm/folders/FR_ROOT"
+    assert root["subfolders_query"] == f"{BASE}/rm/folders?oslc.where=public_rm:parent={BASE}/rm/folders/FR_ROOT"
 
 
 @respx.mock
-async def test_list_folders_no_component_returns_empty():
-    """17. SP without oslc_config:component -> [] (A4, degrades)."""
+async def test_list_folders_no_project_area_raises_toolerror():
+    """17. SP without a project area (oslc:details) -> clear error, not [] (G5 loop 2, was A4 'degrades')."""
     _mock_rm_discovery(services_xml=RM_SP_NO_COMPONENT_XML)
-    result = await list_folders("PROJ")
-    assert result == []
+    with pytest.raises(ToolError, match="project area not advertised"):
+        await list_folders("PROJ")
 
 
 @respx.mock

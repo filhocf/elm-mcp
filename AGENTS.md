@@ -13,7 +13,7 @@ src/elm_mcp/
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
-└── server.py         # FastMCP server with 6 tools
+└── server.py         # MCP server with 19 tools (12 read-only, 7 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking
@@ -82,6 +82,10 @@ uv run pytest tests/ -v --cov=elm_mcp --cov-report=term-missing
 uv run ruff check src/ tests/
 uv run ruff format --check src/ tests/
 ```
+
+Tool contract: `tests/contract/tools.snapshot.json` freezes tool names, parameters and the read-only flag.
+After an intentional change to a tool, regenerate it with `uv run python scripts/update_contract.py` and note
+it in `CHANGELOG.md`.
 
 Mock HTTP with `respx`. All tests are async (`asyncio_mode = "auto"`).
 Coverage excludes `cli.py` (interactive terminal code).

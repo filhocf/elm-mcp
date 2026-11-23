@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from . import oslc
 from .config import settings
@@ -21,8 +22,11 @@ VALID_DOMAINS = ("rm", "ccm", "qm")
 _T = TypeVar("_T")
 
 
-def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+def _register(func: Callable[..., Awaitable[_T]], read_only: bool) -> Callable[..., Awaitable[_T]]:
     """Register an async MCP tool, translating domain errors into ToolError.
+
+    ``read_only`` is published as the MCP ``readOnlyHint`` annotation (part of the versioned
+    contract in tests/contract/tools.snapshot.json).
 
     OSLC/discovery failures surface from oslc.py as ValueError/RuntimeError
     (e.g. "Project not found", "No query capability found"). Without this wrap
@@ -41,10 +45,20 @@ def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
         except (ValueError, RuntimeError) as exc:
             raise ToolError(str(exc)) from exc
 
-    return mcp.tool()(wrapper)
+    return mcp.tool(annotations=ToolAnnotations(readOnlyHint=read_only))(wrapper)
 
 
-@tool
+def tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+    """Register a WRITE tool (readOnlyHint=False)."""
+    return _register(func, read_only=False)
+
+
+def read_tool(func: Callable[..., Awaitable[_T]]) -> Callable[..., Awaitable[_T]]:
+    """Register a READ-ONLY tool (readOnlyHint=True)."""
+    return _register(func, read_only=True)
+
+
+@read_tool
 async def list_projects(domain: str) -> list[dict]:
     """List projects for a domain (rm=DOORS Next, ccm=RTC, qm=ETM)."""
     domain = domain.lower()
@@ -53,19 +67,19 @@ async def list_projects(domain: str) -> list[dict]:
     return await oslc.list_service_providers(domain)
 
 
-@tool
+@read_tool
 async def search_requirements(project: str, query: str | None = None) -> list[dict]:
     """Search requirements in a DOORS Next project. Query uses oslc.where syntax."""
     return await oslc.query_resources("rm", project, query)
 
 
-@tool
+@read_tool
 async def get_requirement(uri: str) -> dict:
     """Get a single requirement by its OSLC URI."""
     return await oslc.get_resource(uri)
 
 
-@tool
+@read_tool
 async def list_workitems(project: str, query: str | None = None) -> list[dict]:
     """Search work items in an RTC project. Query uses oslc.where syntax."""
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
@@ -89,14 +103,14 @@ async def list_workitems(project: str, query: str | None = None) -> list[dict]:
     return parsed
 
 
-@tool
+@read_tool
 async def get_workitem(id: str) -> dict:
     """Get a single work item by ID (constructs URI from CCM base)."""
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
     return await oslc.get_resource(uri)
 
 
-@tool
+@read_tool
 async def search_testcases(project: str, query: str | None = None) -> list[dict]:
     """Search test cases in an ETM project. Query uses oslc.where syntax."""
     return await oslc.query_resources("qm", project, query)
@@ -105,7 +119,7 @@ async def search_testcases(project: str, query: str | None = None) -> list[dict]
 TYPE_IDS = oslc.CCM_TYPE_IDS
 
 
-@tool
+@read_tool
 async def list_iterations(project: str) -> list[dict]:
     """List iterations (sprints/releases) for an RTC project with title and dates."""
     project_url = await oslc._resolve_project_url("ccm", project)
@@ -113,8 +127,9 @@ async def list_iterations(project: str) -> list[dict]:
     project_area_id = parts[1].split("/")[0] if len(parts) > 1 else project_url.rstrip("/").split("/")[-1]
     client = await oslc.get_client()
     url = f"{settings.elm_url}/ccm/oslc/iterations?projectArea={project_area_id}"
-    resp = await client.get(url, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
-    resp.raise_for_status()
+    resp = await oslc.fetch(
+        client, "GET", url, "list_iterations", headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    )
     results = resp.json().get("oslc:results", [])
     iterations = []
     for r in results:
@@ -137,7 +152,7 @@ async def list_iterations(project: str) -> list[dict]:
     return iterations
 
 
-@tool
+@read_tool
 async def get_plan_items(project: str, plan: str | None = None, item_ids: list[str] | None = None) -> dict:
     """Get hierarchical view of Items de Backlog with their child Tarefas expanded.
 
@@ -379,14 +394,16 @@ async def create_requirement(
     """Create a requirement in a DOORS Next (RM) project via OSLC.
 
     The HTML content is sanitized to XHTML and stored in jazz_rm:primaryText.
+    Returns {"uri", "identifier"}, both read back from the server.
 
     Args:
         project: RM project name (e.g., "MY RM PROJECT")
         title: Requirement title (required)
         content: HTML content (sanitized to XHTML for primaryText)
         folder: Folder URI to link the requirement to (nav:parent), optional
-        type: instanceShape URI for the requirement type, optional. MVP: a URI,
-            not a type name — shape discovery depends on SPEC-discovery-tools.
+        type: REQUIRED. Requirement type: the shape URI or the type title, both as shown by
+            list_types("rm", project). Without it, or with an unknown title, the call is refused
+            listing the valid types (the server would answer 403 CRRRS6404E).
     """
     xhtml = oslc.sanitize_html_to_xhtml(content)
     return await oslc.create_requirement(project, title, xhtml, folder=folder, shape=type)
@@ -409,6 +426,21 @@ async def update_requirement(
 
 
 @tool
+async def delete_requirement(uri: str) -> dict:
+    """Delete a requirement in DOORS Next (RM) via OSLC DELETE and confirm by re-reading it.
+
+    Irreversible. The deletion is confirmed when the re-read answers 404 or 410; if the
+    requirement is still readable the call fails.
+
+    Args:
+        uri: OSLC URI of the requirement to delete
+
+    Returns {"uri", "deleted": true}.
+    """
+    return await oslc.delete_requirement(uri)
+
+
+@read_tool
 async def list_types(domain: str, project: str) -> list[dict]:
     """List resource types available in a project area.
 
@@ -428,7 +460,7 @@ async def list_types(domain: str, project: str) -> list[dict]:
     return await oslc.list_resource_shapes(domain, project)
 
 
-@tool
+@read_tool
 async def list_fields(domain: str, project: str, type: str) -> dict:
     """List required/optional fields of a type, with allowedValues when enumerated.
 
@@ -447,7 +479,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     return await oslc.list_fields(domain, project, type)
 
 
-@tool
+@read_tool
 async def inspect_workitem(id: str) -> dict:
     """Read a real work item and derive its shape/factory and filled fields.
 
@@ -459,7 +491,7 @@ async def inspect_workitem(id: str) -> dict:
     return await oslc.inspect_workitem(id)
 
 
-@tool
+@read_tool
 async def list_folders(project: str) -> list[dict]:
     """List RM (DOORS Next) folders for a project. Returns [{"title", "uri"}]."""
     return await oslc.list_folders(project)

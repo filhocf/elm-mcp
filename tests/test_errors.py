@@ -21,12 +21,17 @@ async def test_catalog_url_timeout():
 
 @pytest.mark.asyncio
 async def test_catalog_url_401():
-    with patch("elm_mcp.oslc.get_client", new_callable=AsyncMock) as mock_client:
+    # _authenticate is patched: the re-login of the 401 is not what this test is about
+    # (with the AsyncMock client its response would be a mock, not an HTTP status).
+    with (
+        patch("elm_mcp.oslc.get_client", new_callable=AsyncMock) as mock_client,
+        patch("elm_mcp.oslc._authenticate", new_callable=AsyncMock),
+    ):
         client = AsyncMock()
         resp = httpx.Response(401, request=httpx.Request("GET", "http://test"))
         client.get.return_value = resp
         mock_client.return_value = client
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ValueError, match="sessao"):
             await get_catalog_url("rm")
 
 
@@ -37,7 +42,7 @@ async def test_get_resource_404():
         resp = httpx.Response(404, request=httpx.Request("GET", "http://test/rm/req/999"))
         client.get.return_value = resp
         mock_client.return_value = client
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ValueError, match="recurso-inexistente-ou-invisivel"):
             await get_resource("http://test/rm/req/999")
 
 
