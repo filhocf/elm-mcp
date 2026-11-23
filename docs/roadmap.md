@@ -67,7 +67,7 @@ A v0.5.1 deixa de existir: F1 e F2 entram na v0.6.0.
 | W2 | F3 `ccm-colaboracao` + `wi-custom-types` + paginação >50 e refresh de sessão | Remove `TYPE_IDS` fixo. |
 | W3 | F6 `qm-leitura` (D12) + `oslc-links` | Links destravam qm-write. |
 | W4 | F4 `perfil-template` + cache TTL de `instanceShape` por PA + idempotência/duplicata | Resolve a decisão aberta 1 (local do perfil). |
-| W5 | F5 `ccm-interno` (flag) + agregação de horas por pessoa/IB | Resolve a decisão aberta 2 (flag no pacote). |
+| W5 | F5 `ccm-interno`: SÓ LEITURA (anexos) + `horas` (list_time, get_hours); escrita por API interna ADIADA (Gate -1) | Decisão aberta 2 fica para quando houver permissão de escrita e evidência de payload. |
 | W6 | F7 `qm-write` | Depende de W2 (links) e W3 (leitura). |
 
 Fora da v0.6.0: F8/JRS (bloqueio de permissão REST no ELM; pedido de acesso ao admin), `credential-keyring` e
