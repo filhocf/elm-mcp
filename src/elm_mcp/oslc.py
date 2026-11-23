@@ -1529,3 +1529,173 @@ async def list_folders(project: str) -> list[dict]:
         sub = props.get(_NAV_SUBFOLDERS, [])
         folders.append({"title": title, "uri": folder_uri, "subfolders_query": sub[0].get("value") if sub else None})
     return folders
+
+
+# =====================================================================
+# CCM collaboration (SPEC-ccm-colaboracao, W2): comments, links, set_field, workflow.
+# Every write is a partial PUT (?oslc.properties) with If-Match; every HTTP error goes
+# through fetch/_check_put -> diagnose_http_error (named gate).
+# Property names were verified read-only on the real server (7.0.1) unless marked
+# "to be confirmed in live acceptance".
+# =====================================================================
+
+_JSON_HEADERS = {"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+_LINKTYPE_PREFIX = "rtc_cm:com.ibm.team.workitem.linktype."
+
+# Tool link type -> work item property (values: list of {"rdf:resource", "dcterms:title"}).
+# Inverses on the target side (not written by the tools): parentworkitem.children,
+# duplicateworkitem.duplicates, resolvesworkitem.resolvedBy.
+LINK_TYPES = {
+    "parent": _LINKTYPE_PREFIX + "parentworkitem.parent",
+    "blocks": _LINKTYPE_PREFIX + "blocksworkitem.blocks",
+    "depends_on": _LINKTYPE_PREFIX + "blocksworkitem.dependsOn",
+    "related": _LINKTYPE_PREFIX + "relatedworkitem.related",
+    "duplicate_of": _LINKTYPE_PREFIX + "duplicateworkitem.duplicateOf",
+    "resolves": _LINKTYPE_PREFIX + "resolvesworkitem.resolves",
+}
+# A work item has at most one parent: linking a new parent replaces the current one (re-parent).
+_SINGLE_VALUED_LINKS = {"parent"}
+
+_COMMENT_CONTENT_TYPE = "application/x-oslc-cm-change-request+json"
+# Title of the "not assigned" literal of an enumeration. To be confirmed in live acceptance
+# (only the English title was seen in the RED fixtures).
+_UNASSIGNED_RE = _re.compile(r"^\s*(unassigned|n[aã]o\s+(atribu[ií]do|designado))\s*$", _re.IGNORECASE)
+_WORKFLOW_STATES_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/?#]+)/?$")
+_WORKITEM_ID_RE = _re.compile(r"/(?:com\.ibm\.team\.workitem\.WorkItem|oslc/workitems)/([^/?#]+)/?$")
+
+
+def workitem_uri(id: str) -> str:
+    """Canonical URI of a work item (same form as get_workitem/update_workitem)."""
+    return f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{_quote_segment(id)}"
+
+
+def _quote_segment(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(str(value).strip(), safe="")
+
+
+def _workitem_key(uri: str) -> str:
+    """Work item id of either URL form (itemName/... or oslc/workitems/...); the URI itself otherwise."""
+    m = _WORKITEM_ID_RE.search(uri or "")
+    return m.group(1) if m else uri
+
+
+def _resource_uri(value) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("rdf:resource") or value.get("rdf:about")
+    return value if isinstance(value, str) and value else None
+
+
+def _as_list(value) -> list:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+async def _read_item(client: httpx.AsyncClient, uri: str, operation: str) -> tuple[dict, str]:
+    """GET a work item as JSON; returns (item, ETag or '')."""
+    resp = await fetch(client, "GET", uri, operation, headers=_JSON_HEADERS)
+    return resp.json(), resp.headers.get("ETag", "")
+
+
+async def _put_partial(
+    client: httpx.AsyncClient, uri: str, etag: str, item: dict, payload: dict, operation: str
+) -> None:
+    """Partial PUT of ``payload`` (?oslc.properties) conditioned on ``etag`` (If-Match)."""
+    if not etag:
+        raise ValueError(f"Server did not return an ETag for work item '{uri}'. Cannot safely write.")
+    body = dict(payload)
+    prefixes = item.get("prefixes")
+    if isinstance(prefixes, dict):
+        body["prefixes"] = prefixes
+    resp = await _request(
+        client,
+        "PUT",
+        uri,
+        params={"oslc.properties": ",".join(payload)},
+        json=body,
+        headers={**_JSON_HEADERS, "Content-Type": "application/json", "If-Match": etag},
+    )
+    _check_put(resp, operation, uri)
+
+
+# ---------------------------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------------------------
+def comments_uri(id: str) -> str:
+    return f"{settings.elm_url}/ccm/oslc/workitems/{_quote_segment(id)}/rtc_cm:comments"
+
+
+async def _comment_entry(client: httpx.AsyncClient, member) -> dict:
+    """{id, author, created, text} of one oslc:comment member (inline, or a reference that is read).
+
+    The body of an individual comment (dcterms:identifier/creator/created/description) is to be
+    confirmed in live acceptance.
+    """
+    if isinstance(member, str):
+        member = {"rdf:resource": member}
+    if not isinstance(member, dict):
+        return {"id": None, "author": None, "created": None, "text": None}
+    if set(member) <= {"rdf:resource"} and member.get("rdf:resource"):
+        resp = await fetch(client, "GET", member["rdf:resource"], "list_comments", headers=_JSON_HEADERS)
+        member = {**resp.json(), "rdf:about": member["rdf:resource"]}
+    about = member.get("rdf:about") or member.get("rdf:resource") or ""
+    ident = member.get("dcterms:identifier")
+    creator = member.get("dcterms:creator")
+    return {
+        "id": str(ident) if ident is not None else (_last_segment(about) if about else None),
+        "author": _resource_uri(creator) or (creator if isinstance(creator, str) else None),
+        "created": member.get("dcterms:created"),
+        "text": member.get("dcterms:description"),
+    }
+
+
+async def list_comments(id: str) -> list[dict]:
+    """Comments of a work item: oslc:discussedBy -> oslc:comment, in thread order."""
+    client = await get_client()
+    item, _ = await _read_item(client, workitem_uri(id), "list_comments")
+    discussion = _resource_uri(item.get("oslc:discussedBy"))
+    if not discussion:
+        return []  # an item that never had a comment may carry no discussion
+    resp = await fetch(client, "GET", discussion, "list_comments", headers=_JSON_HEADERS)
+    data = resp.json()
+    members = _as_list(data.get("oslc:comment") if isinstance(data, dict) else None)
+    return [await _comment_entry(client, m) for m in members]
+
+
+async def add_comment(id: str, text: str) -> dict:
+    """POST a comment (OSLC CM 1.0) and confirm it through list_comments. The POST is never repeated."""
+    if not text or not text.strip():
+        raise ValueError("Comment text must not be empty.")
+    before = {c["id"] for c in await list_comments(id)}
+    client = await get_client()
+    url = comments_uri(id)
+    # CM 1.0 on purpose: with OSLC-Core-Version 2.0 this endpoint answers 405.
+    resp = await fetch(
+        client,
+        "POST",
+        url,
+        "add_comment",
+        json={"dc:description": text},
+        headers={"Content-Type": _COMMENT_CONTENT_TYPE, "Accept": "application/json"},
+    )
+    try:
+        created_uri = _resource_uri(resp.json())
+    except ValueError:
+        created_uri = None
+    created_id = _last_segment(created_uri) if created_uri else None
+
+    after = await list_comments(id)
+    new = [c for c in after if c["id"] not in before and c["text"] == text]
+    if created_id is not None:
+        new = [c for c in new if c["id"] == created_id] or new
+    if not new:
+        raise ValueError(
+            f"The server answered HTTP {resp.status_code} to the comment POST on work item {id}, but the "
+            "comment does not appear in the discussion. It was NOT resent (to avoid a duplicate): check the "
+            "work item before retrying."
+        )
+    return new[-1]
+
+

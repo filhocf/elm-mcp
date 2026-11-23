@@ -384,6 +384,26 @@ async def transition_workitem(id: str, action: str) -> str:
 
 
 @tool
+async def add_comment(id: str, text: str) -> dict:
+    """Add a comment to a work item and confirm it appears in the discussion.
+
+    Args:
+        id: Work item ID (number)
+        text: Comment text
+
+    Returns the new comment {"id", "author", "created", "text"}. If the server accepts the POST but
+    the comment does not appear, the call fails WITHOUT resending it (check the item before retrying).
+    """
+    return await oslc.add_comment(id, text)
+
+
+@read_tool
+async def list_comments(id: str) -> list[dict]:
+    """List the comments of a work item: [{"id", "author", "created", "text"}] in thread order."""
+    return await oslc.list_comments(id)
+
+
+@tool
 async def create_requirement(
     project: str,
     title: str,
