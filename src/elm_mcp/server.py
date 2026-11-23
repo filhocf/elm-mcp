@@ -196,8 +196,9 @@ async def get_test_results(project: str, test_case: str | None = None) -> dict:
         project: ETM project name
         test_case: optional test case URI; keeps only the results that report on it
 
-    Returns {"items": [{uri, title, verdict, points, execution_record, test_case}], "truncated": bool}.
-    Property names of a test result are to be confirmed in live acceptance.
+    Returns {"items": [{uri, title, verdict, verdict_name, points, execution_record, test_case}], "truncated": bool}.
+    verdict is the URI (fragment) of the verdict resource; verdict_name is its readable last part
+    (e.g. "inconclusive"). Zeroed points come as 0.
     """
     return await qm.get_test_results(project, test_case)
 

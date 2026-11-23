@@ -4,9 +4,12 @@ The ETM only speaks RDF/XML (JSON gets 406). A query answer holds the members IN
 ``rdf:Description`` elements, next to the query resource itself (type ``...Query``) and an
 ``oslc:ResponseInfo`` (``oslc:totalCount``, ``oslc:nextPage``), which are not members.
 
-Premises not verified live (to be confirmed in live acceptance): the property names of a TestResult
-(``verdict``, ``pointsPassed``/``pointsFailed``/``pointsBlocked``, ``reportsOnTestCase``,
-``producedByTestExecutionRecord``) and the ``rdf:type`` of Keyword, BuildRecord and TestEnvironment members.
+Namespaces (verified live): the ``oslc:resourceType`` of the QueryCapabilities and the ``rdf:type`` of the
+members use TWO namespaces, ``oslc_qm`` (TestExecutionRecord, TestPlan, TestCase, TestScript, TestResult) and
+``rqm`` (the other nine). A capability is chosen by the LOCAL name ``<Type>Query`` in either namespace.
+
+The verdict of a TestResult is the URI of a resource (``.../ExecutionResult#com.ibm.rqm.execution.common.state.
+inconclusive``); ``verdict`` keeps that URI and ``verdict_name`` is its readable final fragment.
 """
 
 import logging
@@ -41,8 +44,8 @@ _CORE = oslc.NS["oslc"]
 _DCTERMS = oslc.NS["dcterms"]
 _RQM = "http://jazz.net/ns/qm/rqm#"
 _RQM_PROCESS = "http://jazz.net/xmlns/prod/jazz/rqm/process/1.0/"
-# Namespaces of the QM domain types. Members are recognised by an rdf:type in one of them
-# (the rqm namespace for types the ETM may not publish as oslc_qm: to be confirmed in live acceptance).
+# Namespaces of the QM domain types (verified live): capabilities and members are matched by local name
+# in either of them, and in no other.
 _QM_TYPE_NAMESPACES = (oslc.NS["oslc_qm"], _RQM)
 _HEADERS = {"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
 
@@ -158,9 +161,13 @@ def _page(xml_text: str) -> tuple[list[dict], int | None, str | None]:
 
 
 async def _query_base(project_url: str, type_name: str) -> str:
-    """queryBase of the capability whose oslc:resourceType is ``qm#<type>Query`` (never by position)."""
+    """queryBase of the capability whose oslc:resourceType has local name ``<type>Query`` (never by position).
+
+    Both QM namespaces (oslc_qm and rqm) are accepted; two capabilities with that local name are ambiguous.
+    """
     client = await get_client()
-    wanted = f"{oslc.NS['oslc_qm']}{type_name}Query"
+    wanted = {f"{ns}{type_name}Query" for ns in _QM_TYPE_NAMESPACES}
+    local_wanted = f"{type_name}Query"
     if project_url.endswith("services.xml"):
         candidates = [project_url.replace("/services.xml", "/services"), project_url]
     else:
@@ -173,16 +180,23 @@ async def _query_base(project_url: str, type_name: str) -> str:
             if isinstance(exc, ValueError) and not isinstance(exc, ET.ParseError):
                 last_error = exc
             continue
+        bases: list[str] = []
         for qc in root.iter(f"{{{_CORE}}}QueryCapability"):
             rt = qc.find(f"{{{_CORE}}}resourceType")
             base = qc.find(f"{{{_CORE}}}queryBase")
-            if rt is not None and base is not None and rt.get(f"{{{_RDF}}}resource") == wanted:
-                return base.get(f"{{{_RDF}}}resource")
+            if rt is not None and base is not None and rt.get(f"{{{_RDF}}}resource") in wanted:
+                bases.append(base.get(f"{{{_RDF}}}resource"))
+        if len(bases) > 1:
+            raise ValueError(
+                f"Ambiguous: the project '{project_url}' has {len(bases)} query capabilities named {local_wanted}."
+            )
+        if bases:
+            return bases[0]
         last_error = None  # a document was read: the type is simply not offered (no other capability is used)
         break
     if last_error is not None:
         raise last_error
-    raise ValueError(f"The project '{project_url}' has no query capability for QM type {type_name} ({wanted}).")
+    raise ValueError(f"The project '{project_url}' has no query capability for QM type {type_name} ({local_wanted}).")
 
 
 async def query_members(
@@ -287,6 +301,12 @@ def _points(member: dict, name: str) -> int | None:
     return int(value) if value is not None and value.lstrip("-").isdigit() else None
 
 
+def _verdict_name(verdict_uri: str) -> str | None:
+    """Readable verdict: the last segment of the fragment (``...state.inconclusive`` -> ``inconclusive``)."""
+    fragment = verdict_uri.rsplit("#", 1)[-1]
+    return fragment.rsplit(".", 1)[-1] or None
+
+
 async def get_test_results(project: str, test_case: str | None = None) -> dict:
     """Test results with verdict, points and originating execution record; ``test_case`` filters client-side."""
     members, _, truncated = await query_members(project, "TestResult", None, oslc.MAX_QUERY_LIMIT)
@@ -304,6 +324,7 @@ async def get_test_results(project: str, test_case: str | None = None) -> dict:
                 "title": m["title"],
                 "short_id": m["short_id"],
                 "verdict": verdicts[0] if verdicts else None,
+                "verdict_name": _verdict_name(verdicts[0]) if verdicts else None,
                 "points": {
                     "passed": _points(m, "pointsPassed"),
                     "failed": _points(m, "pointsFailed"),

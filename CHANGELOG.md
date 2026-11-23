@@ -12,7 +12,7 @@ ETM reading and cross-domain links (SPEC-qm-leitura, SPEC-oslc-links, wave W3):
 - `list_qm_resources(project, type, query=None, limit=None)`: lists any of the 14 ETM types, one item per resource, with `total` from `oslc:totalCount`.
 - `get_qm_resource(uri)`: normalized properties and grouped links (`validates_requirement`, `tests_change_request`, scripts, results).
 - `get_test_coverage(project)`: requirements validated and work items tested, per test case.
-- `get_test_results(project, test_case=None)`: verdict, points per status and originating execution record.
+- `get_test_results(project, test_case=None)`: verdict (URI of the verdict resource) and `verdict_name` (its readable final fragment, e.g. `inconclusive`), points per status and originating execution record. Property names confirmed in live reading.
 - `link_artifacts(source_uri, target_uri, link_type)`: links a work item to an RM/QM artifact (13 `oslc_cm` types); partial PUT with `If-Match`, confirmed by re-reading. The write format is to be confirmed in live acceptance.
 - `unlink_artifacts(source_uri, target_uri, link_type)`: removes only that link, keeping the others.
 
