@@ -1,6 +1,7 @@
 """OSLC service discovery and query builder for IBM ELM."""
 
 import html as _html
+import io
 import logging
 import re as _re
 from xml.etree import ElementTree as ET
@@ -339,10 +340,79 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
     return data.get("oslc:results", data.get("rdfs:member", data.get("results", [data])))
 
 
+def _rdfxml_to_flat_dict(xml_text: str, uri: str) -> dict:
+    """Flatten the main rdf:Description of an RDF/XML document into a plain dict.
+
+    Keys are ``rdf:about`` plus ``prefix:name`` for every property (prefixes as declared in the document).
+    Values are text (literal), the inner XML as a string (``rdf:parseType="Literal"``) or a URI
+    (``rdf:resource``); a repeated property becomes a list. The main Description is the one whose
+    ``rdf:about`` equals ``uri``, else the first one.
+    """
+    prefixes: dict[str, str] = {}
+    root = None
+    for event, item in ET.iterparse(io.StringIO(xml_text), events=("start-ns", "end")):
+        if event == "start-ns":
+            prefix, ns_uri = item
+            prefixes.setdefault(ns_uri, prefix)
+        else:
+            root = item
+    rdf_ns = NS["rdf"]
+    descriptions = list(root) if root is not None else []
+    main = next((d for d in descriptions if d.get(f"{{{rdf_ns}}}about") == uri), None)
+    if main is None and descriptions:
+        main = descriptions[0]
+    result: dict = {}
+    if main is None:
+        return result
+    result["rdf:about"] = main.get(f"{{{rdf_ns}}}about", uri)
+    for prop in main:
+        key = _prop_qname(prop, prefixes)
+        if prop.get(f"{{{rdf_ns}}}resource") is not None:
+            value = prop.get(f"{{{rdf_ns}}}resource")
+        elif prop.get(f"{{{rdf_ns}}}parseType") == "Literal":
+            raw = _re.search(
+                r"<"
+                + _re.escape(_prop_qname(prop, prefixes))
+                + r"\b[^>]*>(.*?)</"
+                + _re.escape(_prop_qname(prop, prefixes))
+                + ">",
+                xml_text,
+                _re.DOTALL,
+            )
+            value = raw.group(1).strip() if raw else ""
+        else:
+            value = prop.text or ""
+        if key in result:
+            if not isinstance(result[key], list):
+                result[key] = [result[key]]
+            result[key].append(value)
+        else:
+            result[key] = value
+    return result
+
+
+def _prop_qname(prop: ET.Element, prefixes: dict[str, str]) -> str:
+    """Return the prefixed name (``prefix:local``) of an element as declared in the document."""
+    ns_uri, _, local = prop.tag[1:].partition("}") if prop.tag.startswith("{") else ("", "", prop.tag)
+    prefix = prefixes.get(ns_uri, "")
+    return f"{prefix}:{local}" if prefix else local
+
+
 async def get_resource(uri: str) -> dict:
-    """Fetch a single OSLC resource by URI."""
+    """Fetch a single OSLC resource by URI.
+
+    Asks for JSON. RM resources answer HTTP 415 to JSON: in that case the request is repeated with
+    ``application/rdf+xml`` and the RDF/XML is flattened to a dict (see _rdfxml_to_flat_dict).
+    """
     client = await get_client()
-    return await _get_json(client, uri)
+    resp = await _request(client, "GET", uri, headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"})
+    if resp.status_code == 415:
+        resp = await fetch(
+            client, "GET", uri, "read", headers={"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"}
+        )
+        return _rdfxml_to_flat_dict(resp.text, uri)
+    check_response(resp, "read", uri)
+    return resp.json()
 
 
 async def _find_current_iteration(project_url: str) -> str | None:
@@ -989,7 +1059,21 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
         if put_resp.is_success:
             raise RuntimeError(f"Expected 200/204, got {put_resp.status_code}")
         _raise_write_error(put_resp, "update_requirement", uri)
-    return {"uri": uri, "identifier": _extract_identifier(put_resp.text)}
+    result: dict = {"uri": uri, "identifier": _extract_identifier(put_resp.text)}
+    # The PUT already succeeded: a failed re-read must never propagate (same rule as create_requirement).
+    try:
+        reread = await fetch(
+            client,
+            "GET",
+            uri,
+            "update_requirement",
+            headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
+        )
+        result["identifier"] = _extract_identifier(reread.text) or result["identifier"]
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("update_requirement: updated %s but the re-read failed (%s)", uri, exc)
+        result["warning"] = "Requirement updated, but re-reading it failed; the identifier may be missing."
+    return result
 
 
 # =====================================================================
@@ -1003,8 +1087,9 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
 NS["oslc_config"] = "http://open-services.net/ns/config#"
 NS["public_rm"] = "http://jazz.net/xmlns/rm/public/1.0/"
 
-# System folders filtered out of list_folders — tenant-neutral (no org string).
-_SYSTEM_FOLDER_TITLES = {"root", "Folder Query Results"}
+_RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+_NAV_FOLDER_TYPE = "http://jazz.net/ns/rm/navigation#folder"
+_NAV_SUBFOLDERS = "http://jazz.net/ns/rm/navigation#subfolders"
 
 
 def _shape_title(xml_text: str) -> str | None:
@@ -1318,9 +1403,10 @@ async def list_folders(project: str) -> list[dict]:
     area URI (oslc:details), then GETs /rm/folders?oslc.where=public_rm:parent=
     <project area> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
     (The component URI is rejected by the server with a 400: D3.)
-    System folders (root, Folder Query Results) are filtered (tenant-neutral).
+    Only resources typed nav#folder are returned (query/description resources are dropped);
+    the root folder is included because it is a valid parent for create_requirement(folder=...).
     Raises ValueError when the service provider announces no project area (no oslc:details).
-    Returns [{"title","uri"}].
+    Returns [{"title","uri","subfolders_query"}] (subfolders_query is a URI or None; not navigable yet).
     """
     project_url = await _resolve_project_url("rm", project)
     sp_xml = await _get_xml_text(project_url)
@@ -1346,9 +1432,13 @@ async def list_folders(project: str) -> list[dict]:
 
     folders: list[dict] = []
     for folder_uri, props in data.items():
+        # Keep only real folders (nav#folder): the query answer also carries a ResponseInfo
+        # and a nav#Description resource. The root folder is kept: it is a valid parent.
+        types = [t.get("value") for t in props.get(_RDF_TYPE, []) if isinstance(t, dict)]
+        if _NAV_FOLDER_TYPE not in types:
+            continue
         title_entries = props.get("http://purl.org/dc/terms/title", [])
         title = title_entries[0].get("value") if title_entries else None
-        if title in _SYSTEM_FOLDER_TITLES:
-            continue
-        folders.append({"title": title, "uri": folder_uri})
+        sub = props.get(_NAV_SUBFOLDERS, [])
+        folders.append({"title": title, "uri": folder_uri, "subfolders_query": sub[0].get("value") if sub else None})
     return folders

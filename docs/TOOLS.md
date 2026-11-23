@@ -10,7 +10,7 @@ See `docs/USAGE.md` for query syntax and examples.
 |------|-----------|-------------|
 | `list_projects`     | `(domain)` | List projects (service providers) for a domain. |
 | `search_requirements` | `(project, query=None)` | OSLC query over RM requirements (DOORS Next). |
-| `get_requirement`   | `(uri)` | Fetch a single requirement by its OSLC URI. |
+| `get_requirement`   | `(uri)` | Fetch a single requirement by its OSLC URI. RM answers HTTP 415 to JSON, so it falls back to `application/rdf+xml` and returns a flat dict (`rdf:about`, `prefix:name` -> text, XML string for `parseType="Literal"`, or URI; repeated properties become lists). |
 | `list_workitems`    | `(project, query=None)` | OSLC query over CCM work items; returns id/title/type/status/owner inline. |
 | `get_workitem`      | `(id)` | Fetch a single work item by ID. |
 | `search_testcases`  | `(project, query=None)` | OSLC query over QM test cases (ETM). |
@@ -27,14 +27,14 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `list_types`       | `(domain, project)` | List resource types available in a project area. `rm`/`qm`: `[{"title", "shape_uri", "resource_type"}]`. `ccm`: one item per work item type creation factory, `[{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]`; `id` is the type id used by `list_fields` and `create_workitem`. |
 | `list_fields`      | `(domain, project, type)` | List required/optional fields of a type, with `allowedValues` when the field is enumerated. `type` is a shape title from `list_types` (case-insensitive); for `ccm` it is the type `id` or `title` from `list_types`, or the alias `task`/`story`. Returns `{"type", "shape_uri", "required":[...], "optional":[...]}`; each field has `name`, `title`, `occurs` (e.g. `Exactly-one`), `read_only`, `property_uri`, `range_uri` and `allowed_values`. |
 | `inspect_workitem` | `(id)` | Read a real work item and derive its shape/factory URIs and filled fields. Returns `{"id", "type", "shape_uri", "factory_uri", "fields":{...}}`. Useful to learn a project area's concrete field values from an existing item. |
-| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project (queried by the project area URI). Returns `[{"title", "uri"}]`. System folders (root, query results) are filtered out. Fails with "project area not advertised by the service provider" when the project does not announce its project area (`oslc:details`). |
+| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project (queried by the project area URI). Returns `[{"title", "uri", "subfolders_query"}]`: only real folders (`nav#folder`), including the root folder (a valid `folder` parent for `create_requirement`); `subfolders_query` is the URI of the child-folder query, or `null` (informational, not navigable yet). Fails with "project area not advertised by the service provider" when the project does not announce its project area (`oslc:details`). |
 
 ## Write (RM requirements)
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
 | `create_requirement` | `(project, title, content, folder=None, type=None)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is **required at runtime** (the schema keeps it optional so the refusal can list the valid types): a shape URI or a type title, both from `list_types("rm", project)`; without it (or with an unknown title) the call is refused listing the valid types. Returns `{"uri", "identifier"}` read back from the server; if that re-read fails after the POST, the requirement exists anyway and the result carries a short `warning` (do not create it again). |
-| `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. |
+| `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. Returns `{"uri", "identifier"}`, the identifier re-read from the server (a failed re-read never raises; the result carries a `warning`). |
 | `delete_requirement` | `(uri)` | Delete a requirement via OSLC DELETE (direct mode, irreversible) and confirm by re-reading it (404 or 410). The DELETE is unconditional (no `If-Match`). Fails if it is still readable, and reports "deletion not confirmed" when the confirmation read is denied (401/403; the DELETE was sent). Returns `{"uri", "deleted": true}`. |
 
 ## Write (CCM work items)

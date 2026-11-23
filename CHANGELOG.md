@@ -7,6 +7,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+W1 live-acceptance fixes (ELM 7.0.1):
+
+- `list_folders` returned the query/description resources and dropped the root folder. It now keeps only `nav#folder`
+  resources (root included) and returns `{"title", "uri", "subfolders_query"}`.
+- `get_requirement` failed with HTTP 415 on RM resources. It now retries with `application/rdf+xml` and returns a flat dict.
+- `update_requirement` returned `identifier: null`. It now re-reads the identifier (a failed re-read only adds a `warning`).
+
 CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 of slice F1):
 
 - **D1** `list_types("ccm")` returned property titles ("Children", "Verified"). It now lists one item per typed
