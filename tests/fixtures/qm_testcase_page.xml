@@ -25,21 +25,21 @@
     xmlns:oslc_qm="http://open-services.net/ns/qm#"
     xmlns:oslc_rm="http://open-services.net/ns/rm#"
     xmlns:foaf="http://xmlns.com/foaf/0.1/" > 
- <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_KpgFgKgKEe-05of4dO9qjQ">
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID">
   <rqm_process:hasWorkflowState rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/process-info/_PA1/workflowstate/com.ibm.rqm.process.testcase.workflow/com.ibm.rqm.planning.common.new"/>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_KpgFgKgKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
   <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
   <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestCase"/>
   <dcterms:contributor rdf:resource="https://elm.example.com/jts/users/jdoe"/>
   <acp:accessControl rdf:resource="https://elm.example.com/qm/oslc_qm/accessControl/_PA1"/>
   <acc:accessContext rdf:resource="https://elm.example.com/qm/acclist#_PA1"/>
   <rqm_process:hasPriority rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/process-info/_PA1/priority/literal.priority.101"/>
-  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_KpgFgKgKEe-05of4dO9qjQ</dcterms:identifier>
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID</dcterms:identifier>
   <rqm_qm:isLocked rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</rqm_qm:isLocked>
   <rqm_qm:shortIdentifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">88236</rqm_qm:shortIdentifier>
   <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Item 1</dcterms:title>
   <rqm_qm:template rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/template/testcase/com.ibm.rqm.planning.templates.testcase.template_1484588715038"/>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_KpgFgKgKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
   <rqm_qm:scriptStepCount rdf:datatype="http://www.w3.org/2001/XMLSchema#long">0</rqm_qm:scriptStepCount>
   <dcterms:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2024-11-21T13:11:49.307Z</dcterms:modified>
   <oslc:serviceProvider rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/services.xml"/>
@@ -55,25 +55,25 @@
  </rdf:Description>
  <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase?oslc_qm.pageSize=3">
   <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Item 2</dcterms:title>
-  <oslc:nextPage rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase?oslc.paging=true&amp;rqm_qm.queryToken=_C9nkIOcTEfGwUqxeSNfpYw&amp;oslc.pageSize=3&amp;rqm_qm.pageNum=1"/>
+  <oslc:nextPage rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase?oslc.paging=true&amp;rqm_qm.queryToken=_TOKEN&amp;oslc.pageSize=3&amp;rqm_qm.pageNum=1"/>
   <oslc:totalCount rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">187</oslc:totalCount>
   <bp:containerSortPredicates rdf:datatype="http://www.w3.org/2001/XMLSchema#string">rqm_qm:orderIndex</bp:containerSortPredicates>
   <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
   <rdf:type rdf:resource="http://open-services.net/ns/core#ResponseInfo"/>
  </rdf:Description>
- <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_2XqukagKEe-05of4dO9qjQ">
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID">
   <rqm_qm:weight rdf:datatype="http://www.w3.org/2001/XMLSchema#int">100</rqm_qm:weight>
   <dcterms:creator rdf:resource="https://elm.example.com/jts/users/jdoe"/>
   <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Item 3</dcterms:title>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_2XqukagKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
   <dcterms:contributor rdf:resource="https://elm.example.com/jts/users/jdoe"/>
   <process:projectArea rdf:resource="https://elm.example.com/qm/process/project-areas/_PA1"/>
   <rqm_qm:orderIndex rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">2</rqm_qm:orderIndex>
   <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestCase"/>
   <rqm_qm:template rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/CARTEIRA+DIGITAL+DA+TERRA/template/testcase/com.ibm.rqm.planning.templates.testcase.template_1484588715038"/>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_2XqukagKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
   <rdf:type rdf:resource="http://open-services.net/ns/qm#TestCase"/>
-  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_2XqukagKEe-05of4dO9qjQ</dcterms:identifier>
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID</dcterms:identifier>
   <dcterms:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2024-11-21T13:16:42.588Z</dcterms:modified>
   <oslc:shortId rdf:datatype="http://www.w3.org/2001/XMLSchema#int">88242</oslc:shortId>
   <dcterms:created rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2024-11-21T13:16:42.361Z</dcterms:created>
@@ -90,14 +90,14 @@
   <acp:accessControl rdf:resource="https://elm.example.com/qm/oslc_qm/accessControl/_PA1"/>
  </rdf:Description>
  <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase">
-  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_2XqukagKEe-05of4dO9qjQ"/>
-  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_KpgFgKgKEe-05of4dO9qjQ"/>
-  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_Kq6awKgKEe-05of4dO9qjQ"/>
+  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID"/>
+  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID"/>
+  <oslc_qm:testCase rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID"/>
   <rdf:type rdf:resource="http://open-services.net/ns/qm#TestCaseQuery"/>
  </rdf:Description>
- <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_Kq6awKgKEe-05of4dO9qjQ">
+ <rdf:Description rdf:about="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID">
   <dcterms:relation rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/resources/_PA1/testcase/urn:com.ibm.rqm:testcase:88237"/>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_Kq6awKgKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.testCasePreCondition"/>
   <rqm_qm:weight rdf:datatype="http://www.w3.org/2001/XMLSchema#int">100</rqm_qm:weight>
   <oslc:instanceShape rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/shape/resource/com.ibm.rqm.planning.VersionedTestCase"/>
   <dcterms:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2024-11-21T13:11:49.307Z</dcterms:modified>
@@ -111,10 +111,10 @@
   <rqm_qm:orderIndex rdf:datatype="http://www.w3.org/2001/XMLSchema#integer">0</rqm_qm:orderIndex>
   <rqm_process:hasPriority rdf:resource="https://elm.example.com/qm/service/com.ibm.rqm.integration.service.IIntegrationService/process-info/_PA1/priority/literal.priority.101"/>
   <dcterms:description rdf:datatype="http://www.w3.org/2001/XMLSchema#string"></dcterms:description>
-  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_Kq6awKgKEe-05of4dO9qjQ</dcterms:identifier>
+  <dcterms:identifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID</dcterms:identifier>
   <oslc:shortId rdf:datatype="http://www.w3.org/2001/XMLSchema#int">88237</oslc:shortId>
   <dcterms:creator rdf:resource="https://elm.example.com/jts/users/jdoe"/>
-  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_Kq6awKgKEe-05of4dO9qjQ#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
+  <rqm_qm:richTextSection rdf:resource="https://elm.example.com/qm/oslc_qm/contexts/_PA1/resources/com.ibm.rqm.planning.VersionedTestCase/_ID#com.ibm.rqm.planning.editor.section.dynamicSection_1484588841669"/>
   <rdf:type rdf:resource="http://open-services.net/ns/qm#TestCase"/>
   <rqm_qm:shortIdentifier rdf:datatype="http://www.w3.org/2001/XMLSchema#string">88237</rqm_qm:shortIdentifier>
   <dcterms:title rdf:datatype="http://www.w3.org/2001/XMLSchema#string">Item 4</dcterms:title>
