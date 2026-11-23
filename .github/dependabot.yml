@@ -8,3 +8,8 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      # init and analyze must run the same version, or the job fails
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
