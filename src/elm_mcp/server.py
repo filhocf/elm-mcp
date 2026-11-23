@@ -80,10 +80,14 @@ async def get_requirement(uri: str) -> dict:
 
 
 @read_tool
-async def list_workitems(project: str, query: str | None = None) -> list[dict]:
-    """Search work items in an RTC project. Query uses oslc.where syntax."""
+async def list_workitems(project: str, query: str | None = None, limit: int | None = None) -> dict:
+    """Search work items in an RTC project. Query uses oslc.where syntax.
+
+    Follows the server's pages until `limit` items (default 50, maximum 1000).
+    Returns {"items": [...], "truncated": bool}; truncated=True means the query has more items.
+    """
     select = "dcterms:title,dcterms:identifier,dcterms:type,oslc_cm:status,dcterms:contributor"
-    results = await oslc.query_resources("ccm", project, query, select=select)
+    results = await oslc.query_resources("ccm", project, query, select=select, limit=limit)
     parsed = []
     for item in results:
         entry = {"rdf:about": item.get("rdf:about", item.get("rdf:resource", ""))}
@@ -100,7 +104,7 @@ async def list_workitems(project: str, query: str | None = None) -> list[dict]:
             c = item["dcterms:contributor"]
             entry["owner"] = c.get("rdf:resource", c) if isinstance(c, dict) else c
         parsed.append(entry)
-    return parsed
+    return {"items": parsed, "truncated": getattr(results, "truncated", False)}
 
 
 @read_tool

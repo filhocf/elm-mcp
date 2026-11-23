@@ -277,8 +277,48 @@ async def _resolve_project_url(domain: str, project_name: str) -> str:
     raise ValueError(f"Project '{project_name}' not found. Available: {available}")
 
 
-async def query_resources(domain: str, project: str, where: str | None = None, select: str | None = None) -> list[dict]:
-    """Execute an OSLC query on a project, returning JSON results."""
+DEFAULT_QUERY_LIMIT = 50
+MAX_QUERY_LIMIT = 1000
+
+
+class QueryResults(list):
+    """List of query members; ``truncated`` is True when more items exist than were returned."""
+
+    truncated: bool = False
+
+
+def _next_page_url(data: dict) -> str | None:
+    """The oslc:nextPage URL of an OSLC JSON page (top level or inside oslc:responseInfo), or None."""
+    info = data.get("oslc:responseInfo")
+    for holder in (info if isinstance(info, dict) else {}, data):
+        nxt = holder.get("oslc:nextPage")
+        if isinstance(nxt, dict):
+            nxt = nxt.get("rdf:resource")
+        if isinstance(nxt, str) and nxt:
+            return nxt
+    return None
+
+
+def _page_members(data: dict) -> list[dict]:
+    members = data.get("oslc:results", data.get("rdfs:member", data.get("results", [data])))
+    return members if isinstance(members, list) else [members]
+
+
+async def query_resources(
+    domain: str,
+    project: str,
+    where: str | None = None,
+    select: str | None = None,
+    limit: int | None = None,
+) -> QueryResults:
+    """Execute an OSLC query on a project, following oslc:nextPage until ``limit`` unique items.
+
+    ``limit`` defaults to 50 and is capped at 1000. The result is a list with a ``truncated``
+    attribute (True when the query has more items). An expired session is re-authenticated once
+    per page; a page that keeps failing raises a ValueError naming the gate and, after the
+    first page, how many items had been collected.
+    """
+    cap = min(limit if limit and limit > 0 else DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
     project_url = await _resolve_project_url(domain, project)
     query_base = await _find_query_base(domain, project_url)
     client = await get_client()
@@ -304,13 +344,8 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
     else:
         url = query_base
 
-    resp = await _request(
-        client,
-        "GET",
-        url,
-        params=params,
-        headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
-    )
+    headers = {"Accept": "application/json", "OSLC-Core-Version": "2.0"}
+    resp = await _request(client, "GET", url, params=params, headers=headers)
     # Some domains (QM) don't support JSON — fallback to XML
     if resp.status_code == 406:
         resp = await fetch(
@@ -325,7 +360,7 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
         from xml.etree import ElementTree as ET
 
         root = ET.fromstring(resp.text)
-        results = []
+        results = QueryResults()
         for member in root.iter(f"{{{NS['rdf']}}}Description"):
             about = member.get(f"{{{NS['rdf']}}}about")
             title_el = member.find("{http://purl.org/dc/terms/}title")
@@ -333,12 +368,38 @@ async def query_resources(domain: str, project: str, where: str | None = None, s
             if title_el is not None:
                 entry["dcterms:title"] = title_el.text
             results.append(entry)
-        return results if results else [{"raw_xml": resp.text[:2000]}]
+        if not results:
+            results.append({"raw_xml": resp.text[:2000]})
+        return results
 
-    check_response(resp, "query_resources", url)
-    data = resp.json()
-    # OSLC JSON responses have members in rdfs:member or oslc:results
-    return data.get("oslc:results", data.get("rdfs:member", data.get("results", [data])))
+    results = QueryResults()
+    seen: set[str] = set()
+    page_url = url
+    while True:
+        check_response(resp, "query_resources", page_url)
+        data = resp.json()
+        for item in _page_members(data):
+            key = item.get("rdf:about", item.get("rdf:resource")) if isinstance(item, dict) else None
+            if key is not None:
+                if key in seen:
+                    continue
+                seen.add(key)
+            if len(results) >= cap:
+                results.truncated = True
+                return results
+            results.append(item)
+        next_url = _next_page_url(data)
+        if next_url is None:
+            return results
+        if len(results) >= cap:
+            results.truncated = True
+            return results
+        page_url = next_url
+        try:
+            resp = await _request(client, "GET", page_url, headers=headers)
+            check_response(resp, "query_resources", page_url)
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError(f"{exc} ({len(results)} items had been collected before this page failed.)") from exc
 
 
 _XHTML_NS = "http://www.w3.org/1999/xhtml"

@@ -275,6 +275,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "limit",
+          "type": "integer|null",
+          "required": false,
+          "default": null
         }
       ]
     },
