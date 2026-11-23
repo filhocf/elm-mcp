@@ -1032,8 +1032,14 @@ async def transition_workitem(item_uri: str, action: str) -> dict:
     actions_resp = await fetch(
         client, "GET", f"{workflows}/actions/{workflow}", "transition_workitem", headers=json_headers
     )
-    action = profile.action_aliases(profile.load(area)).get(action.strip(), action)
-    action_id = _resolve_workflow_action(action, _action_ids(actions_resp.json()))
+    action_ids = _action_ids(actions_resp.json())
+    try:
+        action_id = _resolve_workflow_action(action, action_ids)
+    except ValueError:  # not an action of this workflow: a profile alias may name one (it never shadows a real action)
+        alias = profile.action_aliases(profile.load(area)).get(action.strip())
+        if alias is None:
+            raise
+        action_id = _resolve_workflow_action(alias, action_ids)
 
     resp = await _request(
         client,
@@ -1226,7 +1232,7 @@ def _describe(entries: list[dict]) -> str:
     return "; ".join(f"{_entry_uri(e)} (identifier {_entry_identifier(e)})" for e in entries)
 
 
-async def create_idempotent(if_exists: str, find, create, kind: str) -> dict:
+async def create_idempotent(if_exists: str, find, create, kind: str, *, known: list[dict] | None = None) -> dict:
     """Create unless ``find()`` already lists an equivalent artifact (SPEC-idempotencia).
 
     ``find`` returns the existing equivalents ([{uri | rdf:about, identifier | dcterms:identifier, ...}]);
@@ -1234,28 +1240,49 @@ async def create_idempotent(if_exists: str, find, create, kind: str) -> dict:
     existing one, ``return`` hands it back with ``created: false``, ``create`` skips the check. A failed check
     refuses the creation (except ``create``). After an ambiguous failure (timeout once the request was sent) the
     POST is NOT resent: ``find`` runs again and only an artifact that was not there before counts as created.
+
+    A POST the server refused (``WriteRejected``) carries the equivalents seen before it as ``.before``. The
+    caller that resends after a stale-shape refusal passes them back as ``known``: the check then runs AGAIN
+    (the server may have created the artifact before answering 400/409) and the POST is resent only when nothing
+    new shows up; otherwise the new artifact is returned as created, with a warning.
     """
     check_if_exists(if_exists)
-    before: list[dict] = []
+    before: list[dict] = list(known) if known is not None else []
+    resend = known is not None
     if if_exists != "create":
         try:
-            before = await find()
+            found = await find()
         except (ValueError, RuntimeError, httpx.HTTPError) as exc:
             raise ValueError(
                 f"The duplicate check failed ({exc}); nothing was created. Fix the cause, or pass "
                 "if_exists='create' to create without the check."
             ) from exc
-        if before and if_exists == "return":
-            return {**before[0], "created": False}
-        if before:
-            raise ValueError(
-                f"A {kind} with the same title already exists: {_describe(before)}. "
-                "Use if_exists='return' to get it, or if_exists='create' to create another one."
-            )
+        if resend:
+            seen = {_entry_uri(e) for e in before}
+            new = [e for e in found if _entry_uri(e) not in seen]
+            if new:
+                return {
+                    **new[0],
+                    "created": True,
+                    "warning": f"The server refused the creation request but the {kind} was found afterwards, so "
+                    "it was created. The request was NOT resent.",
+                }
+        else:
+            before = found
+            if before and if_exists == "return":
+                return {**before[0], "created": False}
+            if before:
+                raise ValueError(
+                    f"A {kind} with the same title already exists: {_describe(before)}. "
+                    "Use if_exists='return' to get it, or if_exists='create' to create another one."
+                )
     try:
         return {**await create(), "created": True}
+    except WriteRejected as exc:
+        exc.before = before
+        raise
     except _AMBIGUOUS_FAILURES as exc:
-        known = {_entry_uri(e) for e in before}
+        known_uris = {_entry_uri(e) for e in before}
         try:
             found = await find()
         except (ValueError, RuntimeError, httpx.HTTPError) as requery_exc:
@@ -1263,7 +1290,7 @@ async def create_idempotent(if_exists: str, find, create, kind: str) -> dict:
                 f"The creation request failed without an answer ({exc}) and the {kind} could not be queried again "
                 f"({requery_exc}). It may or may not exist; the request was NOT resent. Check before retrying."
             ) from exc
-        new = [e for e in found if _entry_uri(e) not in known]
+        new = [e for e in found if _entry_uri(e) not in known_uris]
         if if_exists != "create" and new:
             return {
                 **new[0],
@@ -1278,9 +1305,26 @@ async def create_idempotent(if_exists: str, find, create, kind: str) -> dict:
         ) from exc
 
 
+def _checked_duplicates(results: QueryResults) -> QueryResults:
+    """The duplicate query's results, or ValueError when the query was truncated (fail closed)."""
+    if getattr(results, "truncated", False):
+        raise ValueError(
+            f"duplicate check truncated: the title query returned more than {MAX_QUERY_LIMIT} items, so an "
+            "existing one cannot be ruled out."
+        )
+    return results
+
+
 async def _find_rm_duplicates(project: str, title: str, shape: str, folder: str | None) -> list[dict]:
-    """Requirements of the project with the same normalized title, type and (when given) folder."""
-    results = await query_resources("rm", project, f"dcterms:title={_where_literal(title.strip())}")
+    """Requirements of the project with the same title, type and (when given) folder.
+
+    The server matches the title EXACTLY (``oslc.where``, edge whitespace of the request removed); the
+    normalization (inner spaces, case) only applies to the titles that come back. Without ``folder`` any
+    folder matches (accepted false positive: pass ``folder`` or ``if_exists``).
+    """
+    results = _checked_duplicates(
+        await query_resources("rm", project, f"dcterms:title={_where_literal(title.strip())}", limit=MAX_QUERY_LIMIT)
+    )
     wanted = normalize_title(title)
     return [
         {"uri": item["uri"], "identifier": item.get("identifier")}
@@ -1305,8 +1349,10 @@ async def create_requirement(
     discovers the factory, sanitizes nothing here (the caller passes already-sanitized
     XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
     Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
-    Before the POST, a requirement with the same normalized title, type and folder is looked up (see
-    create_idempotent, ``if_exists``); the result carries ``created``.
+    Before the POST, a requirement with the same title (the server compares it exactly; case and inner spaces
+    count), type and folder is looked up (see create_idempotent, ``if_exists``); the result carries ``created``.
+    Without ``folder`` a requirement in any folder counts as a duplicate (accepted false positive): give
+    ``folder`` or use ``if_exists="return"``/``"create"``. A truncated check refuses the creation.
     Returns {"uri": ..., "identifier": ..., "created": ...}, the identifier re-read from the server (D8). If the
     re-read fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier
     (or None) and a short ``warning`` key, and logs a warning.
@@ -1698,7 +1744,8 @@ def _shape_property(el: ET.Element) -> dict:
         "property_uri": res.get("propertyDefinition"),
         "range_uri": res.get("range"),
         "allowed_values_uri": res.get("allowedValues"),
-        "default_value": res.get("defaultValue"),
+        "default_value": res.get("defaultValue") or text.get("defaultValue") or None,
+        "default_is_uri": res.get("defaultValue") is not None,
     }
 
 
@@ -2594,9 +2641,19 @@ _SELF_FILLED = frozenset({"dcterms:title", "dcterms:type", "rtc_cm:type"})
 
 
 async def find_workitem_duplicates(project: str, title: str, type_id: str, parent_id: str | None) -> list[dict]:
-    """Work items of the project with the same normalized title, type and parent (none when no parent is given)."""
-    results = await query_resources(
-        "ccm", project, f"dcterms:title={_where_literal(title.strip())}", select=_WORKITEM_QUERY_SELECT
+    """Work items of the project with the same title, type and parent (none when no parent is given).
+
+    The server matches the title EXACTLY (``oslc.where``, edge whitespace of the request removed); the
+    normalization (inner spaces, case) only applies to the titles that come back.
+    """
+    results = _checked_duplicates(
+        await query_resources(
+            "ccm",
+            project,
+            f"dcterms:title={_where_literal(title.strip())}",
+            select=_WORKITEM_QUERY_SELECT,
+            limit=MAX_QUERY_LIMIT,
+        )
     )
     wanted = normalize_title(title)
     found = []
@@ -2633,10 +2690,28 @@ def _required_shape_fields(props: list[dict]) -> list[dict]:
     return fields
 
 
+def canonical_property_key(key: str) -> str:
+    """A payload key as the prefixed name the shape check and the RDF/XML writer use.
+
+    A full property URI (also ``<uri>`` or ``{uri}name``) becomes ``prefix:name`` when its namespace is a known
+    one; anything else is returned unchanged.
+    """
+    text = key.strip()
+    if text.startswith("<") and text.endswith(">"):
+        text = text[1:-1].strip()
+    elif text.startswith("{") and "}" in text:
+        namespace, _, local = text[1:].partition("}")
+        text = namespace + local
+    if text.startswith(("http://", "https://")):
+        return _compact(text, _CCM_PREFIXES) or key
+    return text
+
+
 async def missing_required_fields(factory: dict, payload: dict) -> list[str] | None:
     """Required shape properties without default value that ``payload`` does not carry.
 
-    Returned as "key (title)" strings; None when the shape cannot be read (the server then validates).
+    Returned as "key (title)" strings; None when the shape cannot be read (the server then validates). The keys of
+    ``payload`` are normalized (full property URI -> prefixed name) before they are compared.
     """
     if not factory.get("shape_uri"):
         return None
@@ -2647,10 +2722,11 @@ async def missing_required_fields(factory: dict, payload: dict) -> list[str] | N
             "create_workitem: shape of %s unreadable (%s); required fields not pre-checked", factory["id"], exc
         )
         return None
+    present = {canonical_property_key(k) for k in payload}
     return [
         f"{f['key']} ({f['title'] or f['name']})"
         for f in _required_shape_fields(props)
-        if not f["default_value"] and f["key"] not in payload
+        if not f["default_value"] and f["key"] not in present
     ]
 
 
@@ -2669,7 +2745,10 @@ async def build_profile_draft(project: str) -> dict:
         notes: dict = {}
         for field in _required_shape_fields(await list_shape_properties(factory["shape_uri"])):
             default = field["default_value"]
-            values[field["key"]] = {"rdf:resource": default} if default else None
+            if not default:
+                values[field["key"]] = None
+            else:  # a URI default is a resource reference, anything else a literal
+                values[field["key"]] = {"rdf:resource": default} if field["default_is_uri"] else default
             allowed = await list_allowed_values(field["allowed_values_uri"]) if field["allowed_values_uri"] else []
             notes[field["key"]] = {"title": field["title"], "allowed_values": allowed}
         defaults[factory["id"]] = values

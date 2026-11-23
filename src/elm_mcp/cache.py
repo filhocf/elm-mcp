@@ -1,6 +1,7 @@
 """In-memory discovery cache (SPEC-cache-shape): per process, per server, per project area, per resource.
 
-TTL in seconds from ``ELM_CACHE_TTL`` (read on every call; default 300; 0 or less turns the cache off).
+TTL in seconds from ``ELM_CACHE_TTL`` (read on every call; default 300; 0 turns the cache off; a negative,
+``nan`` or infinite value is unusable and means the default).
 The clock is ``time.monotonic()``. Only discovered documents are stored (never credentials or cookies).
 A loader that raises stores nothing. Callers get deep copies, so mutating a result cannot corrupt the cache.
 """
@@ -8,6 +9,7 @@ A loader that raises stores nothing. Callers get deep copies, so mutating a resu
 import contextlib
 import contextvars
 import copy
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable, Iterator
@@ -27,14 +29,15 @@ _refreshed: contextvars.ContextVar[set | None] = contextvars.ContextVar("elm_cac
 
 
 def ttl() -> float:
-    """The TTL in seconds from ELM_CACHE_TTL (default 300; unreadable value -> default)."""
+    """The TTL in seconds from ELM_CACHE_TTL (default 300; unreadable, negative, nan or infinite -> default)."""
     raw = os.environ.get("ELM_CACHE_TTL")
     if raw is None or not raw.strip():
         return DEFAULT_TTL
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return DEFAULT_TTL
+    return value if math.isfinite(value) and value >= 0 else DEFAULT_TTL
 
 
 def clear() -> None:

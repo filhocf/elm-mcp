@@ -12,10 +12,13 @@ Republicar a mesma especificação (ou repetir uma criação após erro de rede)
 - SE a consulta de duplicata falhar (erro de rede ou de permissão), ENTÃO o sistema DEVE recusar a criação com `ToolError` explicando que a checagem não pôde ser feita, exceto se `if_exists="create"`.
 - O retorno de criação DEVE incluir `created: true|false`.
 - O sistema NÃO DEVE reenviar o POST de criação automaticamente após falha ambígua (timeout depois do envio); DEVE reconsultar a duplicata e só então decidir.
+- A consulta DEVE pedir até 1000 itens; SE vier truncada, ENTÃO o sistema DEVE recusar a criação (`duplicate check truncated`), exceto `if_exists="create"`.
+- QUANDO o POST for recusado com 400/409 (forma/valor obsoleto), o sistema DEVE refazer a consulta de duplicata antes do único reenvio e NÃO reenviar se surgiu item novo (devolve-o com `created: true` e `warning`).
+- Sem `folder`, `create_requirement` compara qualquer pasta: falso positivo aceito (saídas: informar `folder`, `if_exists="return"` ou `"create"`).
 
 ## Notas
 Mudança incompatível deliberada: o padrão `error` recusa criação de título duplicado na mesma pasta/tipo. Registrar em `### Changed` do CHANGELOG.
-Normalização do título para comparação: `strip`, colapso de espaços e casefold. A SPEC não usa hash de conteúdo: título + tipo + pasta identificam o artefato na prática, e hash do corpo daria falso negativo em edição.
+Comparação do título: o servidor compara o título EXATO no `oslc.where` (só os espaços das pontas do pedido são removidos); a normalização (`strip`, colapso de espaços, casefold) vale apenas sobre os títulos que voltam e não amplia a consulta. Logo, um existente que difere só em caixa ou espaços internos NÃO é encontrado pela consulta. A SPEC não usa hash de conteúdo: título + tipo + pasta identificam o artefato na prática, e hash do corpo daria falso negativo em edição.
 
 ## Gates
 G3 (respx: sem duplicata cria; duplicata com cada `if_exists`; consulta falha; timeout seguido de reconsulta) → G4 → G5 → aceitação viva (somente leitura: a consulta de duplicata).

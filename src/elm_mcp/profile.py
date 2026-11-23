@@ -21,6 +21,7 @@ import os
 import re
 from pathlib import Path
 
+MAX_PROFILE_BYTES = 1024 * 1024  # a profile is a small hand-written file
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 
@@ -35,6 +36,8 @@ def _read(path: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
+        if path.stat().st_size > MAX_PROFILE_BYTES:
+            raise ValueError(f"file too large ({path.stat().st_size} bytes, limit {MAX_PROFILE_BYTES})")
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"Profile file {path} cannot be read as JSON: {exc}") from exc
