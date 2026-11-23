@@ -1,6 +1,6 @@
 # SPEC — Cache de descoberta por project area (TTL)
 
-**Status:** PLANNED (G0) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §4 · **Onda:** W4
+**Status:** IMPLEMENTADA (G4, aguarda G5) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §4 · **Onda:** W4
 **Classe:** transversal. Origem: backlog "descobrir instanceShape por PA com cache TTL"; evidência de custo: `create_workitem` e os filtros de `list_workitems` repetem rootservices → catálogo → services → shapes a cada chamada.
 
 ## Meta

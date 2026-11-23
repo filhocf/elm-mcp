@@ -13,6 +13,16 @@ Discovery cache and RM query (SPEC-cache-shape, SPEC-rm-consulta, wave W4):
 - `refresh=True` on `list_types`, `list_fields` and `list_workflow` ignores the cache and repopulates it.
 - `search_requirements(project, query=None, limit=None)` accepts `limit` and returns `total` and `configuration` (the stream used) when known.
 
+Idempotency and local profile (SPEC-idempotencia, SPEC-perfil-template, ADR-005, wave W4):
+
+- `if_exists` (`error` | `return` | `create`) on `create_requirement`, `create_workitem` and `add_child_workitem`: a duplicate (same normalized title, type and folder or parent) is refused, returned or ignored.
+- Creation results carry `created: true|false`; a timeout after the POST queries the duplicate again and never resends the POST.
+- Local profile in JSON outside the package (`ELM_MCP_PROFILE_DIR`, default `~/.elm-mcp/profiles/`): templates plus project area overrides, with `defaults`, `action_aliases` and `hidden_states`.
+- `create_workitem` fills missing required fields from the profile and refuses, listing them, those the shape still requires.
+- `transition_workitem` accepts the action aliases of the profile.
+- `list_workitems(include_hidden=False)` leaves out the states the profile hides.
+- `elm-mcp profile draft <project>` prints a profile draft (types, required fields, allowed values) built from read-only discovery.
+
 ETM reading and cross-domain links (SPEC-qm-leitura, SPEC-oslc-links, wave W3):
 
 - `list_qm_resources(project, type, query=None, limit=None)`: lists any of the 14 ETM types, one item per resource, with `total` from `oslc:totalCount`.
@@ -45,6 +55,9 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 - `search_requirements` now returns interpreted items (`uri`, `title`, `identifier`, `type`, `modified`, `folder`) instead of the raw RDF/JSON dictionary: a deliberate change of return.
 - RM queries discover the project's stream and send `Configuration-Context`, `oslc.prefix` (dcterms, oslc, rdf, nav, jazz_rm) and `oslc.select`; a project without a stream is queried without the header.
+- `if_exists` defaults to `error`: creating a requirement or work item whose normalized title, type and folder or parent already exist is now refused. Pass `if_exists="create"` for the old behavior (deliberate incompatible change).
+- `create_workitem` reads the type's shape before the POST and refuses, listing them, required fields without default that neither the call nor the profile fills.
+- The CCM query base is read through the discovery cache, so a query no longer refetches the service provider.
 - `create_workitem` rediscovers the project area once and resends once when the server answers 400 or 409 (stale shape or value); 403, 404 and 500 are not retried.
 
 - `search_testcases` now returns the normalized ETM format: one item per test case `{uri, title, identifier, short_id, state, type}` plus `truncated` (D12: the TestCase capability is chosen by `oslc:resourceType`, RDF/XML only).

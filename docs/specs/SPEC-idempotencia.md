@@ -1,6 +1,6 @@
 # SPEC — Idempotência e checagem de duplicata na criação
 
-**Status:** PLANNED (G0) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W4 · **Depende de:** `SPEC-rm-consulta`
+**Status:** IMPLEMENTADA (G4, aguarda G5 e aceitação viva) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W4 · **Depende de:** `SPEC-rm-consulta`
 
 ## Meta
 Republicar a mesma especificação (ou repetir uma criação após erro de rede) não pode gerar artefato duplicado.
