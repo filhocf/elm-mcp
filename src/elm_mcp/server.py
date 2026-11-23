@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import cache, oslc, profile, qm
+from . import cache, hours, oslc, profile, qm
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -368,6 +368,62 @@ async def get_plan_items(project: str, plan: str | None = None, item_ids: list[s
         result["iteration"] = iteration_info["title"]
         result["start_date"] = iteration_info["start_date"]
         result["end_date"] = iteration_info["end_date"]
+    return result
+
+
+@read_tool
+async def list_time(id: str) -> dict:
+    """List the time sheet entries of a work item: {"id", "entries", "total_hours"}.
+
+    Each entry is {"entry_uri", "person", "date", "hours", "time_code"}; `person` is the creator URI. Time
+    comes from the server in milliseconds and is returned in hours (2 decimals; null time is 0). An item
+    without a sheet or entries returns an empty list. Read only.
+    """
+    return await hours.list_time(id)
+
+
+@read_tool
+async def get_hours(
+    item_ids: list[str] | None = None,
+    plan: str | None = None,
+    project: str | None = None,
+    group_by: str = "person",
+    max_entries: int = 500,
+) -> dict:
+    """Hours of work items and their direct children (same selection as get_plan_items), read from the time sheets.
+
+    Args:
+        item_ids: IDs of the work items (e.g. backlog items); their direct children are included
+        plan: iteration title substring (needs `project`), as in get_plan_items
+        project: project name; only needed with `plan`
+        group_by: "person" (sum per `dcterms:creator`) or "item" (sum per work item, with `estimate_hours`)
+        max_entries: ceiling of sheet entries read in all (default 500, at least 1)
+
+    Entries are read with at most 8 requests at a time. Returns {"group_by", "groups", "total_hours",
+    "items_counted", "entries_read", "partial", "unread_entries", "items_without_entries", "errors",
+    "truncated"}. Above `max_entries` the reading stops and `partial` is true with `unread_entries`. An entry
+    that cannot be read goes to `errors` (`{"entry_uri", "error"}`) and is left out of the totals. In "item"
+    mode a work item with `timeSpent` but no entries uses its `timeSpent` and is marked `without_entries`.
+    Read only.
+    """
+    if group_by not in hours.GROUP_BY:
+        raise ToolError(f"Invalid group_by '{group_by}'. Must be one of: {hours.GROUP_BY}")
+    if isinstance(max_entries, bool) or not isinstance(max_entries, int) or max_entries < 1:
+        raise ToolError("max_entries must be an integer >= 1")
+    if not item_ids and not plan:
+        raise ToolError("Provide either 'item_ids' (work item IDs) or 'plan' (iteration name, with 'project')")
+    if not item_ids and not project:
+        raise ToolError("'plan' needs 'project'")
+    selection = await get_plan_items(project or "", plan=plan, item_ids=item_ids)
+    if "error" in selection:
+        raise ToolError(selection["error"])
+    ids: list[str] = []
+    for ib in selection["items"]:
+        ids.append(ib["id"])
+        ids.extend(child["id"] for child in ib["children"])
+    ids = [i for i in dict.fromkeys(ids) if i]
+    result = await hours.collect_hours(ids, group_by, max_entries)
+    result["truncated"] = selection["truncated"]
     return result
 
 
