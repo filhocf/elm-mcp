@@ -22,7 +22,7 @@ O workflow e a project area saem da URI de `rtc_cm:state` do item (`…/oslc/wor
 Zero ou mais de um candidato: `ToolError` listando os ids disponíveis. O docstring, `docs/TOOLS.md` e a skill `elm-workitems`
 passam a dizer que `action` é o id (ou sufixo) da ação do workflow, e que as quatro palavras valem só onde o template as tem.
 | D11 | `update_resource` | PUT do recurso inteiro mesclado (130+ campos) | PUT parcial `?oslc.properties=<props alteradas>` com `If-Match` |
-| D13 | `create_workitem` sem `filed_against` | 500 `Child team area is not part of this team area hierarchy` (aceitação viva, loop 1) | `_find_default_category` usa o último segmento da URL do projeto (`services.xml`) como id da project area, e `/ccm/oslc/categories?projectArea=` ignora o filtro (devolve as categorias de todas as áreas). Fonte correta: `oslc:defaultValue` da propriedade `filedAgainst` no shape do tipo; sem default, o primeiro de `oslc:allowedValues` dessa propriedade |
+| D13 | `create_workitem` sem `filed_against` | 500 (loop 1) e depois 403 `Atendido por needs to be set` (loop 2): o `oslc:defaultValue` de `filedAgainst` no shape é a categoria raiz "Não designado", que o processo trata como vazia; não há flag OSLC que a identifique (só o título localizado) | **Decisão do mantenedor (23/nov):** não escolher categoria automaticamente. Sem `filed_against`, NÃO enviar `rtc_cm:filedAgainst` (vale o default do servidor); remover `_find_default_category` e o fallback "primeiro `allowedValue`". Se o servidor recusar com `oslc:message` sobre categoria, o `ToolError` DEVE acrescentar a dica de usar `list_fields` (mostra `allowedValues` de `filedAgainst`). Default real por PA vai para o perfil (`SPEC-perfil-template`, F4) |
 
 ### Formato real do shape no servidor de referência (D2, achado na aceitação viva do loop 1)
 O shape de CCM não usa elementos `<oslc:Property>`. Cada propriedade é um bloco
@@ -44,6 +44,10 @@ O parser DEVE aceitar os dois formatos (elemento `oslc:Property` e `rdf:Descript
 - SE o estado relido for igual ao anterior, ENTÃO o sistema DEVE levantar `ToolError` dizendo que a ação não se aplica ao estado atual.
 - O sistema NÃO DEVE gravar estado por PUT em `rtc_cm:state`.
 - QUANDO uma atualização for feita, o sistema DEVE enviar só as propriedades alteradas via `oslc.properties`, com `If-Match`; SE o servidor responder 412, ENTÃO DEVE levantar `ToolError` de conflito.
+
+- QUANDO `filed_against` não for informado, o sistema NÃO DEVE enviar `rtc_cm:filedAgainst` nem consultar categorias.
+- SE o servidor recusar a criação com `oslc:message` que cite a categoria, ENTÃO o `ToolError` DEVE conter o texto do servidor e a dica de consultar `list_fields` (`filedAgainst`).
+- QUANDO `filed_against` for informado, o sistema DEVE enviá-lo como está.
 
 ## Aceitação viva (servidor de referência, item descartável)
 Criar tarefa e story pela fábrica do tipo com os obrigatórios do perfil; atribuir responsável; transicionar story por 2 ações
