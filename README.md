@@ -82,7 +82,7 @@ export ELM_PASSWORD=secret
 
 **Discovery:** `list_types` · `list_fields` · `inspect_workitem` · `list_folders`
 
-**Write (RM requirements):** `create_requirement` · `update_requirement`
+**Write (RM requirements):** `create_requirement` · `update_requirement` · `delete_requirement`
 
 **Write (CCM work items):** `create_workitem` · `update_workitem` · `add_child_workitem` ·
 `transition_workitem`

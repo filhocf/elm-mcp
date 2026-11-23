@@ -31,11 +31,14 @@ CCM corrections verified against ELM 7.0.1 (SPEC-ccm-correcoes, defects D1-D11 o
   changed properties (`?oslc.properties=...`) with `If-Match`, returns the re-read item, and reports a stale
   ETag (412) as a conflict.
 
+- **D3** `list_folders` failed with HTTP 400 because it queried folders by the component URI. It now queries by the project area URI announced by the service provider (`oslc:details`).
+- **D8** `create_requirement` returned `identifier: null` when the POST body was empty. It now re-reads the created artifact and returns the server's `dcterms:identifier`.
 - **D13** `create_workitem` without `filed_against` no longer sends a category (the server applies its own default) and
   no longer looks one up; a refusal about the category now adds a hint to use `list_fields` (property `filedAgainst`).
 
 ### Changed
 
+- **Breaking:** `create_requirement` now requires `type` (a shape URI or a type title from `list_types("rm")`). Without it, or with an unknown title, the call is refused with the list of valid types and nothing is sent; before, the server answered 403 CRRRS6404E.
 - Every HTTP error of a read or write tool is now a `ToolError` that names the probable gate (`credencial`, `sessao`, `regra-de-processo`, `permissao`, `recurso-inexistente-ou-invisivel`, `conflito`, `formato`) and the action to take, instead of a bare `HTTPStatusError`; the server's `oslc:message` is passed through unchanged.
 - Reads now re-authenticate once on a 401 or a 403 without `oslc:message` (writes already did); a failed login no longer leaves a half-authenticated client cached.
 - `transition_workitem`: `action` is now the id or id suffix of a workflow action; `start`/`resolve`/`close`/
@@ -48,6 +51,7 @@ RM write and discovery: the agentic membrane for DOORS Next.
 ### Added
 
 - Discovery tools `list_types`, `list_fields`, `inspect_workitem` and `list_folders` — enumerate types, shape fields and folders per project area, so callers adapt to each project instead of hardcoding (#45).
+- `delete_requirement` tool: delete an RM requirement (direct mode) and confirm by re-reading it (404 or 410); fails if it is still readable.
 - `create_requirement` tool — create a requirement in DOORS Next (RM) via OSLC; HTML content is
   sanitized to XHTML and stored in `jazz_rm:primaryText`; optional `folder` (nav:parent) and `type`
   (instanceShape URI).

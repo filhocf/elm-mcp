@@ -27,14 +27,15 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 | `list_types`       | `(domain, project)` | List resource types available in a project area. `rm`/`qm`: `[{"title", "shape_uri", "resource_type"}]`. `ccm`: one item per work item type creation factory, `[{"title", "id", "factory_title", "factory_uri", "shape_uri", "resource_type"}]`; `id` is the type id used by `list_fields` and `create_workitem`. |
 | `list_fields`      | `(domain, project, type)` | List required/optional fields of a type, with `allowedValues` when the field is enumerated. `type` is a shape title from `list_types` (case-insensitive); for `ccm` it is the type `id` or `title` from `list_types`, or the alias `task`/`story`. Returns `{"type", "shape_uri", "required":[...], "optional":[...]}`; each field has `name`, `title`, `occurs` (e.g. `Exactly-one`), `read_only`, `property_uri`, `range_uri` and `allowed_values`. |
 | `inspect_workitem` | `(id)` | Read a real work item and derive its shape/factory URIs and filled fields. Returns `{"id", "type", "shape_uri", "factory_uri", "fields":{...}}`. Useful to learn a project area's concrete field values from an existing item. |
-| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project. Returns `[{"title", "uri"}]`. System folders (root, query results) are filtered out. |
+| `list_folders`     | `(project)` | List RM (DOORS Next) folders for a project (queried by the project area URI). Returns `[{"title", "uri"}]`. System folders (root, query results) are filtered out. |
 
 ## Write (RM requirements)
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
-| `create_requirement` | `(project, title, content, folder=None, type=None)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is an `instanceShape` URI (from `list_types`). |
+| `create_requirement` | `(project, title, content, folder=None, type)` | Create a requirement in a DOORS Next (RM) project. `content` is HTML, sanitized to XHTML and stored in `jazz_rm:primaryText`. `folder` is a folder URI (`nav:parent`, from `list_folders`). `type` is **required**: a shape URI or a type title, both from `list_types("rm", project)`; without it (or with an unknown title) the call is refused listing the valid types. Returns `{"uri", "identifier"}` read back from the server. |
 | `update_requirement` | `(uri, title=None, content=None)` | Update a requirement via OSLC PUT with ETag. `content` is HTML, sanitized to XHTML. |
+| `delete_requirement` | `(uri)` | Delete a requirement via OSLC DELETE (direct mode, irreversible) and confirm by re-reading it (404 or 410). Fails if it is still readable. Returns `{"uri", "deleted": true}`. |
 
 ## Write (CCM work items)
 
@@ -70,8 +71,7 @@ the `Authorization` header never appear in the message.
   that vary per project area. Use `list_types` → `list_fields` (and `list_folders` for RM, or
   `inspect_workitem` to copy a real item's values) first. Nothing about a specific organization is
   baked into the package (see `docs/ARCHITECTURE.md`, core vs adaptation).
-- `create_requirement` takes an `instanceShape` URI in `type`. Resolve the title you want
-  (e.g. a requirement kind) to its `shape_uri` via `list_types` on the `rm` domain.
+- `create_requirement` requires `type`: pass the `shape_uri` or the title from `list_types` on the `rm` domain.
 - `create_workitem` currently supports `task` and `story`. Additional types (defect, technical debt,
   risk, impediment) are on the roadmap (`docs/specs/SPEC-wi-custom-types.md`).
 - `custom_fields` injects project-specific RDF attributes; values are discovered per project area

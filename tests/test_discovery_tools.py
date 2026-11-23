@@ -32,7 +32,7 @@ the RED test pins a concrete, realistic degrade behavior — revisit at G4 revie
       allowed_values == [] (empty), key present, does not break. (G0 §7 case 8.)
   A3. inspect_workitem with NO oslc:instanceShape -> shape_uri is None and
       factory_uri is None (degrades, does not raise). (G0 §7 case 14.)
-  A4. list_folders when the service provider has NO oslc_config:component
+  A4. list_folders when the service provider has NO project area (oslc:details)
       -> returns [] (empty list), does NOT raise. (G0 §7 case 17.)
   A5. list_fields resolves `type` by title with case-insensitive equality;
       an unknown title raises ValueError -> ToolError at the @tool boundary.
@@ -292,6 +292,7 @@ WI_JSON_NO_SHAPE = {
 
 # ---- list_folders fixtures ----
 RM_COMPONENT_URI = f"{BASE}/rm/cm/component/_compA"
+RM_PROJECT_AREA_URI = f"{BASE}/process/project-areas/_PA1"
 FOLDERS_URL = f"{BASE}/rm/folders"
 
 # RM service provider rdf+xml exposing oslc_config:component. Varied prefix.
@@ -301,6 +302,7 @@ RM_SP_WITH_COMPONENT_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
     xmlns:oslc="http://open-services.net/ns/core#"
     xmlns:oslc_config="http://open-services.net/ns/config#">
     <oslc:ServiceProvider>
+        <oslc:details rdf:resource="{RM_PROJECT_AREA_URI}"/>
         <oslc_config:component rdf:resource="{RM_COMPONENT_URI}"/>
     </oslc:ServiceProvider>
 </rdf:RDF>
@@ -540,10 +542,12 @@ async def test_inspect_workitem_no_instance_shape_degrades():
 # ======================================================================
 @respx.mock
 async def test_list_folders_returns_titles_and_uris():
-    """15. SP->component->folders JSON; non-system folders have title + uri."""
+    """15. SP->project area->folders JSON; non-system folders have title + uri."""
     _mock_rm_discovery(services_xml=RM_SP_WITH_COMPONENT_XML)
-    respx.get(FOLDERS_URL).mock(return_value=httpx.Response(200, json=FOLDERS_JSON))
+    folders_route = respx.get(FOLDERS_URL).mock(return_value=httpx.Response(200, json=FOLDERS_JSON))
     result = await list_folders("PROJ")
+    # W1/D3: the parent is the project area (oslc:details), not the component.
+    assert folders_route.calls[0].request.url.params["oslc.where"] == f"public_rm:parent={RM_PROJECT_AREA_URI}"
     titles = {f["title"] for f in result}
     assert "Requirements" in titles
     assert "Designs" in titles
@@ -564,7 +568,7 @@ async def test_list_folders_filters_system_folders():
 
 @respx.mock
 async def test_list_folders_no_component_returns_empty():
-    """17. SP without oslc_config:component -> [] (A4, degrades)."""
+    """17. SP without a project area (oslc:details) -> [] (A4, degrades)."""
     _mock_rm_discovery(services_xml=RM_SP_NO_COMPONENT_XML)
     result = await list_folders("PROJ")
     assert result == []

@@ -85,6 +85,16 @@ RM_SERVICES_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
 # Created requirement URI (Location header after POST).
 CREATED_RM_URI = f"{BASE}/rm/resources/_req42"
 
+# W1/D7: `type` is now required; a shape URI is accepted as is (no discovery needed).
+RM_SHAPE_URI = f"{BASE}/rm/types/_shapeReq"
+
+# W1/D8: the identifier is read back from the created artifact.
+CREATED_RM_RDF = f"""<?xml version="1.0"?>
+<rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:dcterms="http://purl.org/dc/terms/" rdf:about="{CREATED_RM_URI}">
+    <dcterms:identifier>42</dcterms:identifier>
+</rdf:Description>"""
+
 
 @pytest.fixture(autouse=True)
 async def cleanup(monkeypatch):
@@ -125,12 +135,16 @@ async def test_create_requirement_posts_xhtml_primarytext_and_returns_uri():
 </rdf:Description>""",
         )
     )
+    reread_route = respx.get(CREATED_RM_URI).mock(return_value=httpx.Response(200, text=CREATED_RM_RDF))
     result = await create_requirement(
         project="MY RM PROJECT",
         title="Novo Requisito",
         content="<p>Conteúdo <b>rico</b></p>",
+        type=RM_SHAPE_URI,
     )
     assert post_route.called
+    assert reread_route.called
+    assert result["identifier"] == "42"
     # Returns the created resource URI and/or identifier
     returned = str(result.get("uri") or result.get("url") or "") + str(result.get("identifier") or "")
     assert CREATED_RM_URI in returned or "42" in returned
@@ -150,10 +164,12 @@ async def test_create_requirement_accepts_200():
     """publicar_elm aceita 200 OU 201 no RM — 200 não deve ser tratado como erro."""
     _mock_rm_discovery()
     respx.post(RM_FACTORY_URL).mock(return_value=httpx.Response(200, headers={"Location": CREATED_RM_URI}, text=""))
+    respx.get(CREATED_RM_URI).mock(return_value=httpx.Response(200, text=CREATED_RM_RDF))
     result = await create_requirement(
         project="MY RM PROJECT",
         title="Req 200",
         content="<p>ok</p>",
+        type=RM_SHAPE_URI,
     )
     assert isinstance(result, dict)
     returned = str(result.get("uri") or result.get("url") or "")
@@ -171,11 +187,13 @@ async def test_create_requirement_folder_emits_nav_parent():
     post_route = respx.post(RM_FACTORY_URL).mock(
         return_value=httpx.Response(201, headers={"Location": CREATED_RM_URI}, text="")
     )
+    respx.get(CREATED_RM_URI).mock(return_value=httpx.Response(200, text=CREATED_RM_RDF))
     await create_requirement(
         project="MY RM PROJECT",
         title="Req com pasta",
         content="<p>x</p>",
         folder=folder_uri,
+        type=RM_SHAPE_URI,
     )
     body = post_route.calls[0].request.content.decode()
     assert "nav:parent" in body

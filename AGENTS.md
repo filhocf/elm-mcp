@@ -13,7 +13,7 @@ src/elm_mcp/
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
-└── server.py         # FastMCP server with 6 tools
+└── server.py         # MCP server with 19 tools (12 read-only, 7 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking

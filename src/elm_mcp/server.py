@@ -380,14 +380,16 @@ async def create_requirement(
     """Create a requirement in a DOORS Next (RM) project via OSLC.
 
     The HTML content is sanitized to XHTML and stored in jazz_rm:primaryText.
+    Returns {"uri", "identifier"}, both read back from the server.
 
     Args:
         project: RM project name (e.g., "MY RM PROJECT")
         title: Requirement title (required)
         content: HTML content (sanitized to XHTML for primaryText)
         folder: Folder URI to link the requirement to (nav:parent), optional
-        type: instanceShape URI for the requirement type, optional. MVP: a URI,
-            not a type name — shape discovery depends on SPEC-discovery-tools.
+        type: REQUIRED. Requirement type: the shape URI or the type title, both as shown by
+            list_types("rm", project). Without it, or with an unknown title, the call is refused
+            listing the valid types (the server would answer 403 CRRRS6404E).
     """
     xhtml = oslc.sanitize_html_to_xhtml(content)
     return await oslc.create_requirement(project, title, xhtml, folder=folder, shape=type)
@@ -407,6 +409,21 @@ async def update_requirement(
         content: New HTML content, sanitized to XHTML (optional)
     """
     return await oslc.update_requirement(uri, title=title, xhtml=content)
+
+
+@tool
+async def delete_requirement(uri: str) -> dict:
+    """Delete a requirement in DOORS Next (RM) via OSLC DELETE and confirm by re-reading it.
+
+    Irreversible. The deletion is confirmed when the re-read answers 404 or 410; if the
+    requirement is still readable the call fails.
+
+    Args:
+        uri: OSLC URI of the requirement to delete
+
+    Returns {"uri", "deleted": true}.
+    """
+    return await oslc.delete_requirement(uri)
 
 
 @tool

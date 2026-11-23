@@ -808,14 +808,15 @@ async def create_requirement(
 ) -> dict:
     """Create an RM requirement via OSLC POST to the requirementFactory.
 
-    Resolves the project, discovers the factory, sanitizes nothing here (the
-    caller passes already-sanitized XHTML), builds the RDF/XML, and POSTs it
-    (Accept/Content-Type application/rdf+xml). Accepts 200 or 201. Re-authenticates
-    once on an expired session (see _needs_reauth).
-    Returns {"uri": ..., "identifier": ...}. Raises ValueError if the project
-    does not exist (propagated from _resolve_project_url).
+    Resolves the project, requires and resolves ``shape`` (URI or type title, D7),
+    discovers the factory, sanitizes nothing here (the caller passes already-sanitized
+    XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
+    Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
+    Returns {"uri": ..., "identifier": ...}, the identifier re-read from the server (D8).
+    Raises ValueError if the project does not exist or the type is missing/unknown.
     """
     project_url = await _resolve_project_url("rm", project)
+    shape = await _resolve_requirement_shape(project, shape)
     factory_url = await _find_requirement_factory(project_url)
     _assert_xhtml_wellformed(xhtml)
     rdf_body = _requirement_to_rdfxml(title, xhtml, shape=shape, folder=folder)
@@ -832,7 +833,59 @@ async def create_requirement(
         _raise_write_error(resp, "create_requirement", factory_url)
     location = resp.headers.get("Location", "")
     identifier = _extract_identifier(resp.text)
+    if location:
+        # The POST body can be empty: read the identifier back from the created artifact (D8).
+        try:
+            reread = await fetch(
+                client,
+                "GET",
+                location,
+                "create_requirement",
+                headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
+            )
+            identifier = _extract_identifier(reread.text) or identifier
+        except ValueError as exc:
+            logger.debug("create_requirement: re-read of %s failed (%s)", location, exc)
     return {"uri": location, "identifier": identifier}
+
+
+async def _resolve_requirement_shape(project: str, type_arg: str | None) -> str:
+    """Resolve the required RM type (D7) to a shape URI.
+
+    ``type_arg`` is a shape URI (used as is) or a type title matched case-insensitively
+    against list_types("rm"). Without a type, or with an unknown title, raises ValueError
+    listing the available types (the POST is never sent).
+    """
+    wanted = (type_arg or "").strip()
+    if wanted.lower().startswith(("http://", "https://")):
+        return wanted
+    shapes = await list_resource_shapes("rm", project)
+    if wanted:
+        match = next((sh for sh in shapes if (sh["title"] or "").lower() == wanted.lower()), None)
+        if match is not None:
+            return match["shape_uri"]
+    available = ", ".join(f"{sh['title']} ({sh['shape_uri']})" for sh in shapes) or "none found"
+    reason = f"Unknown type '{wanted}'" if wanted else "'type' is required"
+    raise ValueError(f"{reason} for create_requirement. Available RM types (see list_types): {available}")
+
+
+async def delete_requirement(uri: str) -> dict:
+    """DELETE an RM requirement (direct mode) and confirm by re-reading it (404 or 410).
+
+    Raises ValueError when the DELETE is refused (gate named) or when the artifact is still
+    readable afterwards. Returns {"uri", "deleted": True}.
+    """
+    client = await get_client()
+    resp = await _request(client, "DELETE", uri, headers={"OSLC-Core-Version": "2.0"})
+    if not resp.is_success:
+        _raise_write_error(resp, "delete_requirement", uri)
+    check = await _request(client, "GET", uri, headers={"Accept": "application/rdf+xml", "OSLC-Core-Version": "2.0"})
+    if check.status_code in (404, 410):
+        return {"uri": uri, "deleted": True}
+    if check.is_success:
+        raise ValueError(f"DELETE was accepted but the requirement is still readable: {uri}")
+    check_response(check, "delete_requirement", uri)
+    raise ValueError(f"Could not confirm the deletion of {uri}")
 
 
 async def update_requirement(uri: str, title: str | None = None, xhtml: str | None = None) -> dict:
@@ -1242,19 +1295,20 @@ async def inspect_workitem(id: str) -> dict:
 async def list_folders(project: str) -> list[dict]:
     """List RM (DOORS Next) folders for a project.
 
-    Resolves the RM service provider, reads it as rdf+xml to extract the
-    oslc_config:component URI, then GETs /rm/folders?oslc.where=public_rm:parent=
-    <component> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
+    Resolves the RM service provider, reads it as rdf+xml to extract the project
+    area URI (oslc:details), then GETs /rm/folders?oslc.where=public_rm:parent=
+    <project area> as JSON and parses {folder_uri: {dcterms:title:[{value}]}}.
+    (The component URI is rejected by the server with a 400: D3.)
     System folders (root, Folder Query Results) are filtered (tenant-neutral).
-    Degrades to [] when the service provider exposes no component.
+    Degrades to [] when the service provider announces no project area.
     Returns [{"title","uri"}].
     """
     project_url = await _resolve_project_url("rm", project)
     sp_xml = await _get_xml_text(project_url)
-    comp_m = _re.search(r"<\w*:?component\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
-    if comp_m is None:
+    area_m = _re.search(r"<\w*:?details\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
+    if area_m is None:
         return []
-    component_uri = comp_m.group(1)
+    project_area_uri = area_m.group(1)
 
     client = await get_client()
     folders_url = f"{settings.elm_url}/rm/folders"
@@ -1263,7 +1317,7 @@ async def list_folders(project: str) -> list[dict]:
         "GET",
         folders_url,
         "list_folders",
-        params={"oslc.where": f"public_rm:parent={component_uri}"},
+        params={"oslc.where": f"public_rm:parent={project_area_uri}"},
         headers={"Accept": "application/json", "OSLC-Core-Version": "2.0"},
     )
     data = resp.json()
