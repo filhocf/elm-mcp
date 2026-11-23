@@ -170,6 +170,33 @@
       ]
     },
     {
+      "name": "download_attachment",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "attachment",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "dest",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "overwrite",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ]
+    },
+    {
       "name": "get_hours",
       "read_only": true,
       "parameters": [
@@ -337,6 +364,17 @@
         },
         {
           "name": "link_type",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "list_attachments",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "id",
           "type": "string",
           "required": true
         }
