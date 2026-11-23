@@ -1757,8 +1757,9 @@ async def add_comment(id: str, text: str) -> dict:
     """POST a comment (OSLC CM 1.0) and confirm it through list_comments. The POST is never repeated.
 
     The text is sent HTML-escaped (the server stores comments as HTML) with line breaks as <br/>.
-    Confirmation is by the NEW comment id (ids absent before the POST); the normalized text is only
-    a supporting check when the server's answer does not give the id of the created comment.
+    Confirmation is by the NEW comment id (ids absent before the POST); when the server's answer does not
+    give the id of the created comment, only a new comment with the same normalized text confirms it
+    (a lone new comment of other text may be someone else's, so it is not accepted).
     """
     if not text or not text.strip():
         raise ValueError("Comment text must not be empty.")
@@ -1782,7 +1783,8 @@ async def add_comment(id: str, text: str) -> dict:
     created_id = _last_segment(created_uri) if created_uri else None
 
     after = await list_comments(id)
-    wanted = _plain(text)
+    # Same path on both sides: the server returns the escaped text, so the sent text is compared as stored.
+    wanted = _plain(_comment_html(text))
     fresh = [c for c in after if c["id"] is not None and c["id"] not in before]
     # Comments the server gives no id for cannot be told apart by id: the ones past the old count count as new.
     anonymous = [c for c in after[len(before_list) :] if c["id"] is None]
@@ -1791,8 +1793,6 @@ async def add_comment(id: str, text: str) -> dict:
         new = [c for c in fresh if c["id"] == created_id]
     if not new:
         new = [c for c in fresh if _plain(c["text"]) == wanted]
-    if not new and created_id is None and len(fresh) == 1:
-        new = fresh
     if not new:
         new = [c for c in anonymous if _plain(c["text"]) == wanted]
     if not new:
@@ -1889,22 +1889,50 @@ def _match_literal(value: str, allowed: list[dict]) -> dict | None:
 
 _FIELD_QNAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*:[\w.-]+$")
 _FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*$")
-_INTEGER_RANGES = {"integer", "int", "long", "short", "byte", "nonnegativeinteger", "positiveinteger"}
+_INTEGER_RANGES = {
+    "integer": (None, None),
+    "int": (None, None),
+    "long": (None, None),
+    "short": (None, None),
+    "byte": (None, None),
+    "negativeinteger": (None, -1),
+    "nonpositiveinteger": (None, 0),
+    "nonnegativeinteger": (0, None),
+    "positiveinteger": (1, None),
+    "unsignedint": (0, None),
+    "unsignedlong": (0, None),
+    "unsignedshort": (0, None),
+    "unsignedbyte": (0, None),
+}
 _DECIMAL_RANGES = {"decimal", "double", "float"}
+_INTEGER_RE = _re.compile(r"[+-]?[0-9]+")
+_DECIMAL_RE = _re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
 
 def _convert_to_range(key: str, value: str, range_uri: str | None) -> object:
-    """Convert ``value`` to the XSD range the shape declares (integer, boolean, decimal); a string otherwise."""
+    """Convert ``value`` to the XSD range the shape declares (integer, boolean, decimal); a string otherwise.
+
+    Integers and decimals are plain ASCII (no underscores, no Unicode digits) and integers respect the
+    sign of their range (nonNegativeInteger, negativeInteger...).
+    """
     kind = _last_segment(range_uri).lower() if range_uri else ""
     text = str(value).strip()
     try:
         if kind in _INTEGER_RANGES:
-            return int(text)
+            if not _INTEGER_RE.fullmatch(text):
+                raise ValueError(text)
+            number = int(text)
+            low, high = _INTEGER_RANGES[kind]
+            if (low is not None and number < low) or (high is not None and number > high):
+                raise ValueError(text)
+            return number
         if kind == "boolean":
             if text.lower() not in ("true", "false"):
                 raise ValueError(text)
             return text.lower() == "true"
         if kind in _DECIMAL_RANGES:
+            if not _DECIMAL_RE.fullmatch(text):
+                raise ValueError(text)
             number = float(text)
             if not math.isfinite(number):
                 raise ValueError(text)

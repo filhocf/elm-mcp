@@ -86,6 +86,13 @@ the `Authorization` header never appear in the message.
   (Implements Requirement / Tested By / Affects) are planned (`docs/specs/`, `docs/roadmap.md`).
 - State changes go through `transition_workitem` (workflow action), not `update_workitem`.
 
+- **Same origin only.** URLs followed from server responses (next pages, workflow states, comment and iteration
+  references, shapes) and the URI of `get_requirement`/`get_resource` must have the same scheme, host and port as
+  `ELM_URL` (`assert_same_origin`); anything else fails before a request is sent. A redirect (3xx) to another origin is
+  refused before it is followed, by a response hook on the HTTP client. Use the exact public URL as `ELM_URL`.
+- `set_field` integer ranges (`integer`, `int`, `long`, `short`, `byte`, `negative/nonPositive/nonNegative/positiveInteger`,
+  `unsigned*`) take plain ASCII digits with optional sign (no `1_000`, no Unicode digits) and the sign of the range is enforced.
+
 ## Flat dict from RDF/XML (`get_resource` on RM)
 
 `get_resource` asks for JSON first. The HTTP 415 fallback to `application/rdf+xml` applies **only to RM URIs** (path starting with `/rm/`); a 415 on any other URI (e.g. `/ccm/`) is reported as an error without a second call. The main `rdf:Description` is the one whose `rdf:about` equals the requested URI (else the first one). A malformed body, or one with a DTD/`<!ENTITY>`, raises `ValueError` (reported as a tool error).

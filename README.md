@@ -62,6 +62,11 @@ export ELM_USER=your_username
 export ELM_PASSWORD=secret
 ```
 
+`ELM_URL` must be exactly the public URL the server announces (same scheme, host and port that appear in the
+URLs of its responses). The client only follows URLs, and redirects, on that origin; a server that announces
+another host name (internal name, http vs https, different port) makes calls fail with "outside the configured
+ELM server". Redirects are checked before being followed, so a 302 to another host is refused.
+
 ### Register with your MCP client
 
 ```json

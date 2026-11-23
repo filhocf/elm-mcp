@@ -13,11 +13,29 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 _client: httpx.AsyncClient | None = None
 
 
+async def _refuse_foreign_redirect(response: httpx.Response) -> None:
+    """Response hook: a redirect that leaves the configured ELM origin is refused BEFORE it is followed.
+
+    httpx follows redirects on its own (the session cookies would go with it); the hook sees the 3xx
+    answer first and checks where ``Location`` points. Raises ValueError, as assert_same_origin does.
+    """
+    location = response.headers.get("location")
+    if response.is_redirect and location:
+        from .oslc import assert_same_origin  # lazy: oslc imports this module
+
+        assert_same_origin(str(response.url.join(location)))
+
+
 async def get_client() -> httpx.AsyncClient:
     """Get authenticated httpx client, re-authenticating if needed."""
     global _client
     if _client is None:
-        client = httpx.AsyncClient(verify=False, timeout=60.0, follow_redirects=True)
+        client = httpx.AsyncClient(
+            verify=False,
+            timeout=60.0,
+            follow_redirects=True,
+            event_hooks={"response": [_refuse_foreign_redirect]},
+        )
         try:
             await _authenticate(client)
         except BaseException:

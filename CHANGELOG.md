@@ -23,6 +23,14 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
   attribute.
 - `list_workflow(project, type)`: states (`id`, `title`, `group`) and action ids of a type's workflow.
 
+### Security
+
+- URLs followed from server responses, and the URI given to `get_requirement`/`get_resource`, are accepted only
+  on the same origin as `ELM_URL` (scheme, host and port; default ports 80/443 are normalized), otherwise the call
+  fails before any request (`assert_same_origin`). Set `ELM_URL` to the exact public URL the server announces.
+- HTTP redirects are checked too: a 3xx whose `Location` leaves that origin is refused before it is followed
+  (response hook on the client). The login flow shares the rule, so an http->https or other-host redirect at login fails.
+
 ### Changed
 
 - `list_workitems` gains the optional filters `type`, `state`, `owner` and `planned_for`, sent to the server in
@@ -31,9 +39,9 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 - **Breaking (W2, deliberate):** `search_requirements` and `search_testcases` now return `{"items": [...], "truncated": bool}` instead of a list (same shape as `list_workitems`), follow the pages up to 1000 items and no longer cut silently at 50. `get_plan_items` also queries up to 1000 items and gains a `truncated` key.
 - Pagination (`oslc:nextPage`) stops on a repeated page URL, on a page without any new item and after 100 pages (`truncated=true`); `limit` of zero or less is an error instead of silently using the default.
 - Security: every URL followed from a server response (next pages, workflow states, comment and iteration references, shapes) must be on the same scheme, host and port as `ELM_URL`; otherwise the call fails. The same applies to the URI given to `get_requirement`.
-- `add_comment` sends the text HTML-escaped (line breaks as `<br/>`) and confirms the comment by its new id (the normalized text is only a supporting check); the POST is still sent once.
+- `add_comment` sends the text HTML-escaped (line breaks as `<br/>`) and confirms the comment by its new id (without the created id, only a new comment with the same normalized text confirms it; the sent and the stored text go through the same escape + normalization, so `<b>` and `&` match); the POST is still sent once.
 - Work item type resolution has an explicit precedence (exact id, then the last segment of the id, then title); two matches at the same level are an error listing the ids.
-- `set_field` refuses a malformed field name (`prefix:name` only), a read-only field and a field outside the item's shape (use `list_fields`), and converts the value to the field's range (integer, boolean, decimal).
+- `set_field` refuses a malformed field name (`prefix:name` only), a read-only field and a field outside the item's shape (use `list_fields`), and converts the value to the field's range (integer family, boolean, decimal). Integers are plain ASCII (`1_000` and non-ASCII digits are refused) and respect the sign of their range (`nonNegativeInteger`, `positiveInteger`, `negativeInteger`, `unsigned*`...).
 - `create_workitem` discovers the project and its factories once instead of twice.
 - `link_workitems` / `unlink_workitems` refuse a link of an item to itself; list_workitems filters also refuse non-printable characters.
 - `create_workitem` accepts any work item type the project exposes (id, title or short alias such as `task`/`story`); an unknown type is refused listing the available ones.
