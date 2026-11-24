@@ -20,17 +20,10 @@ from elm_mcp.auth import close_client
 
 from . import w6_fixtures as w6
 from .w3_fixtures import BASE, DCTERMS, PROJECT, QM_NS, RDF, RQM
-from .w6_fixtures import QmWriteServer, creation_url
+from .w6_fixtures import TYPED, QmWriteServer, creation_url
 
 TITLE = "Login Flow"
 
-# Qualified element name the ETM requires for each supported type.
-TYPED = {
-    "TestCase": f"{{{QM_NS}}}TestCase",
-    "TestPlan": f"{{{QM_NS}}}TestPlan",
-    "TestScript": f"{{{QM_NS}}}TestScript",
-    "TestSuite": f"{{{RQM}}}TestSuite",
-}
 ABOUT = f"{{{RDF}}}about"
 
 
@@ -80,7 +73,7 @@ def _texts(node: ET.Element, local: str) -> list[str]:
 # ======================================================================
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_post_body_is_one_typed_node_about_empty(w2_router, type_name):
-    """FAILS today: the node is ``rdf:Description`` without ``rdf:about``."""
+    """The body is one node, typed as the factory's type, with ``rdf:about=""``."""
     qm = QmWriteServer(w2_router)
     await _create(type_name)
     nodes = _nodes(qm.posts[0])
@@ -91,7 +84,7 @@ async def test_post_body_is_one_typed_node_about_empty(w2_router, type_name):
 
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_typed_node_children_are_only_title_and_description(w2_router, type_name):
-    """FAILS today (wrong element name); the children themselves are already right."""
+    """The typed node has only ``dcterms:title`` (+ ``dcterms:description``) as children."""
     qm = QmWriteServer(w2_router)
     await _create(type_name, description="Checks the login")
     node = _nodes(qm.posts[0])[0]
@@ -103,7 +96,7 @@ async def test_typed_node_children_are_only_title_and_description(w2_router, typ
 
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_typed_node_has_no_description_when_none_given(w2_router, type_name):
-    """FAILS today (wrong element name)."""
+    """The body is the typed node of the requested type."""
     qm = QmWriteServer(w2_router)
     await _create(type_name)
     node = _nodes(qm.posts[0])[0]
@@ -113,7 +106,7 @@ async def test_typed_node_has_no_description_when_none_given(w2_router, type_nam
 
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_typed_body_escapes_markup_and_drops_control_characters(w2_router, type_name):
-    """FAILS today (wrong element name); escaping and control-character removal are asserted on the typed node."""
+    """Escaping and control-character removal are asserted on the typed node."""
     qm = QmWriteServer(w2_router)
     await _create(type_name, title="a < b & c > d\x00\x07", description="5 < 6 & <b>x</b>\x1b")
     node = _nodes(qm.posts[0])[0]
@@ -125,7 +118,7 @@ async def test_typed_body_escapes_markup_and_drops_control_characters(w2_router,
 
 
 async def test_xml_injection_in_the_title_stays_text_inside_the_typed_node(w2_router):
-    """FAILS today (wrong element name)."""
+    """The body is the typed node of the requested type."""
     qm = QmWriteServer(w2_router)
     evil = 'A</dcterms:title><oslc_qm:validatesRequirement rdf:resource="https://evil.example.net/x"/><dcterms:title>B'
     await _create("TestPlan", title=evil)
@@ -140,7 +133,7 @@ async def test_xml_injection_in_the_title_stays_text_inside_the_typed_node(w2_ro
 # ======================================================================
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_create_succeeds_against_a_server_that_refuses_untyped_bodies(w2_router, type_name):
-    """FAILS today: the fake answers 400 to ``rdf:Description`` and the tool raises a ToolError."""
+    """Against a server that answers 400 to untyped bodies, creation succeeds."""
     qm = StrictTypedServer(w2_router)
     result = await _create(type_name)
     assert qm.rejected == []
@@ -172,7 +165,7 @@ async def test_the_strict_fake_refuses_a_testsuite_in_the_oslc_qm_namespace(w2_r
 
 
 async def test_testsuite_body_uses_the_rqm_namespace_not_oslc_qm(w2_router):
-    """FAILS today. Explicit: the TestSuite element must be ``{rqm}TestSuite`` and never ``{oslc_qm}TestSuite``."""
+    """The TestSuite element must be ``{rqm}TestSuite`` and never ``{oslc_qm}TestSuite``."""
     qm = StrictTypedServer(w2_router)
     await _create("TestSuite")
     assert qm.rejected == []
@@ -208,7 +201,7 @@ async def test_deferred_type_is_refused_before_any_request(w2_router, type_name)
 
 
 async def test_title_of_255_and_description_of_32768_are_accepted_in_a_typed_node(w2_router):
-    """FAILS today (wrong element name): boundary values still go through, now typed."""
+    """Boundary values (title 255, description 32768) go through in a typed node."""
     qm = StrictTypedServer(w2_router)
     result = await _create(title="t" * 255, description="d" * 32768)
     assert result["created"] is True
@@ -236,7 +229,7 @@ async def test_if_exists_return_hands_back_the_existing_one_without_posting(w2_r
 
 
 async def test_if_exists_create_posts_a_typed_node_without_checking(w2_router):
-    """FAILS today: skips the check and POSTs, but the POST body is untyped and the strict fake refuses it."""
+    """``if_exists="create"`` skips the duplicate check and POSTs a typed node."""
     qm = StrictTypedServer(w2_router)
     _seed(qm)
     result = await _create(if_exists="create")
@@ -260,7 +253,7 @@ async def test_timeout_after_the_post_never_resends(w2_router, mode):
 # ======================================================================
 @pytest.mark.parametrize("type_name", w6.SUPPORTED)
 async def test_posted_body_passes_scan_as_one_typed_top_level_node(w2_router, type_name):
-    """FAILS today: the scanned node is ``rdf:Description``, not the typed element."""
+    """The scanned node is the typed element, not ``rdf:Description``."""
     qm = QmWriteServer(w2_router)
     await _create(type_name, description="desc")
     doc = qm_write._scan(qm.posts[0].content)
@@ -274,7 +267,7 @@ async def test_posted_body_passes_scan_as_one_typed_top_level_node(w2_router, ty
 # 5. Regression: update / link / unlink / delete on what the server returns
 # ======================================================================
 async def test_update_delete_work_on_a_resource_created_through_the_typed_post(w2_router):
-    """FAILS today only because the create step is refused by the strict fake; update/delete themselves are unchanged."""
+    """update/delete work on a resource created through the typed POST."""
     qm = StrictTypedServer(w2_router)
     created = await _create(description="old")
     uri = created["uri"]
@@ -286,7 +279,7 @@ async def test_update_delete_work_on_a_resource_created_through_the_typed_post(w
 
 
 async def test_link_and_unlink_work_on_a_resource_created_through_the_typed_post(w2_router):
-    """FAILS today only because the create step is refused by the strict fake; link/unlink are unchanged."""
+    """link/unlink work on a resource created through the typed POST."""
     qm = StrictTypedServer(w2_router)
     uri = (await _create())["uri"]
     await server.link_test_case(uri, w6.FIXTURE_REQUIREMENT, "validatesRequirement")
