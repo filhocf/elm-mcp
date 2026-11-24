@@ -85,6 +85,44 @@ update_requirement(
 > `list_types(domain="rm", project=...)` and pass its `shape_uri`. `content` is HTML and is
 > sanitized to XHTML before being stored in `jazz_rm:primaryText`.
 
+### Content format and large bodies
+
+`content_format` (`create_requirement`, `update_requirement`) selects how `content` is read:
+`"html"` (default; sanitized, `script`/`style`/`iframe`/`object`/`embed` and characters above U+FFFF removed),
+`"xhtml"` (only validated and wrapped; refused if not well-formed) or `"markdown"` (headings, paragraphs,
+bold/italic/inline code, fenced code, lists with one nesting level, blockquote, `---`, pipe tables, links and
+images by `http`/`https`/`mailto` URL; raw HTML is escaped). Any other value is refused before any request.
+The stored text always has exactly one `<div xmlns="http://www.w3.org/1999/xhtml">` root, also when the content
+already comes with it.
+
+```python
+create_requirement(
+    project="MY RM PROJECT",
+    title="HF-002 Export",
+    type="...",
+    content="## Rule\n\n- item one\n- item two",
+    content_format="markdown",
+)
+```
+
+`ELM_RM_CREATE_FALLBACK_BYTES` (default 4096, read per call; zero, negative or invalid uses 4096): if the server answers the creation POST with an
+explicit 403 and the content is larger than this many bytes, the requirement is created without text and the
+content is applied by PUT with `If-Match`; the PUT must be accepted (2xx) and the re-read confirms that the
+requirement exists and its ETag changed (the content itself is not compared). The result then carries
+`content_applied`; if the PUT fails it is `false`, the requirement exists (`uri`) and a `warning` says so;
+nothing is deleted. A POST is never resent after a timeout.
+
+Limits and cautions for `content`:
+
+- `ELM_RM_MAX_CONTENT_BYTES` (default 1048576, read per call): larger content is refused before any request.
+- `content_format="xhtml"` only validates and wraps: it does NOT remove active content (`script`, `style`,
+  `iframe`...). Use `html` (sanitized) or `markdown` for untrusted text.
+- In `html`, an unclosed `<script>x` (or a `<script ` without `>`) removes everything up to the end of the text.
+- `html` and `xhtml` refuse comments (`<!--`), CDATA (`<![CDATA[`) and processing instructions (`<?`).
+- Markdown links accept one level of balanced parentheses in the URL (`[a](http://x/a(b))`); labels are limited to
+  1000 and URLs to 2000 characters (longer ones stay as literal text).
+- `update_requirement` warns when the re-read after the PUT returns the same ETag as before.
+
 ## Creating Work Items
 
 ```python

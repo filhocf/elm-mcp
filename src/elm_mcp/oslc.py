@@ -4,6 +4,7 @@ import html as _html
 import io
 import logging
 import math
+import os
 import re as _re
 from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
@@ -14,6 +15,7 @@ import httpx
 from . import cache, profile
 from .auth import _authenticate, get_client, session_state
 from .config import settings
+from .markdown_xhtml import markdown_to_xhtml
 
 logger = logging.getLogger(__name__)
 
@@ -1104,8 +1106,98 @@ _RM_NS_DECLS = (
 _RM_REQUIREMENT_TYPE = "http://open-services.net/ns/rm#Requirement"
 
 
+_OPEN_HTML = _re.compile(r"<html", _re.IGNORECASE)
+_OPEN_BODY = _re.compile(r"<body", _re.IGNORECASE)
+_OPEN_META = _re.compile(r"<meta", _re.IGNORECASE)
+_OPEN_IMG = _re.compile(r"<img", _re.IGNORECASE)
+_OPEN_INPUT = _re.compile(r"<input", _re.IGNORECASE)
+_OPEN_ACTIVE = _re.compile(r"<(script|style|iframe|object|embed)\b", _re.IGNORECASE)
+_CLOSE_ACTIVE = {
+    name: _re.compile(rf"</{name}\s*>", _re.IGNORECASE) for name in ("script", "style", "iframe", "object", "embed")
+}
+_EMBED_TAIL = _re.compile(r"\s*</embed\s*>", _re.IGNORECASE)
+_CLOSE_HEAD = _re.compile(r"</head>", _re.IGNORECASE)
+_OPEN_HEAD = _re.compile(r"<head", _re.IGNORECASE)
+
+
+def _rewrite_tags(content: str, opener, rewrite) -> str:
+    """Replace every ``<name ...>`` (up to the first ``>``) by ``rewrite(match, text_between)``, in linear time.
+
+    A regex ``<name[^>]*>`` rescans to the end of the text for every opener that has no ``>``; here the ``>`` is
+    looked up with ``str.find`` and, when there is none, no later opener can match either, so the scan stops.
+    """
+    out: list[str] = []
+    pos = 0
+    while (m := opener.search(content, pos)) is not None:
+        gt = content.find(">", m.end())
+        if gt == -1:
+            break
+        out.append(content[pos : m.start()])
+        out.append(rewrite(m, content[m.end() : gt]))
+        pos = gt + 1
+    out.append(content[pos:])
+    return "".join(out)
+
+
+def _strip_head(content: str) -> str:
+    """Remove ``<head ...>...</head>`` blocks (linear); an opener without a closing ``</head>`` stays."""
+    out: list[str] = []
+    pos = 0
+    while (m := _OPEN_HEAD.search(content, pos)) is not None:
+        gt = content.find(">", m.end())
+        close = _CLOSE_HEAD.search(content, gt + 1) if gt != -1 else None
+        if close is None:  # no later opener can close either
+            break
+        out.append(content[pos : m.start()])
+        pos = close.end()
+    out.append(content[pos:])
+    return "".join(out)
+
+
+def _strip_active(content: str) -> str:
+    """Remove script/style/iframe/object/embed with everything inside, in linear time.
+
+    A self-closing tag or ``embed`` ends at its ``>``; the others end at ``</tag>``. An opener with no ``>``, or
+    without a closing tag, removes everything up to the end of the text (``<script>x`` loses the ``x``).
+    """
+    out: list[str] = []
+    pos = 0
+    while (m := _OPEN_ACTIVE.search(content, pos)) is not None:
+        out.append(content[pos : m.start()])
+        name = m.group(1).lower()
+        gt = content.find(">", m.end())
+        if gt == -1:
+            return "".join(out)
+        pos = gt + 1
+        if name == "embed":
+            if tail := _EMBED_TAIL.match(content, pos):
+                pos = tail.end()
+        elif content[gt - 1] != "/" or gt - 1 < m.end():
+            close = _CLOSE_ACTIVE[name].search(content, pos)
+            if close is None:
+                return "".join(out)
+            pos = close.end()
+    out.append(content[pos:])
+    return "".join(out)
+
+
 def sanitize_html_to_xhtml(html: str) -> str:
-    """Convert HTML to XHTML valid for the RM primaryText.
+    """Convert HTML to XHTML valid for the RM primaryText, repeating the whole cleaning until the result is stable.
+
+    One pass can splice neighbours into a new active tag (``<scr<script></script>ipt>``, or a removed ``<head></head>``
+    or emoji between the halves of ``<scr...ipt>``), so the pass is repeated until the output no longer changes.
+    """
+    content = html or ""
+    for _ in range(20):
+        cleaned = _sanitize_pass(content)
+        if cleaned == content:
+            return cleaned
+        content = cleaned
+    raise ValueError("requirement content could not be cleaned of active content")
+
+
+def _sanitize_pass(html: str) -> str:
+    """One cleaning pass (see sanitize_html_to_xhtml).
 
     Mirrors publicar_elm.sanitizar_html (G0 §E pt.4): strip html/head/body/meta
     wrappers, close void tags (br/hr/img/input), escape lone ampersands without
@@ -1114,18 +1206,27 @@ def sanitize_html_to_xhtml(html: str) -> str:
     if not html:
         return ""
     content = html
+    # Active content goes away with everything inside it (linear scanners, see _strip_active)
+    # Repeat until stable: removing a tag can splice its neighbours into a new one (<scr<script></script>ipt>)
+    for _ in range(20):
+        stripped = _strip_active(content)
+        if stripped == content:
+            break
+        content = stripped
+    else:
+        raise ValueError("requirement content could not be cleaned of active content")
     # Remove html/head/body/meta wrappers
-    content = _re.sub(r"<html[^>]*>", "", content, flags=_re.IGNORECASE)
+    content = _rewrite_tags(content, _OPEN_HTML, lambda _m, _inner: "")
     content = _re.sub(r"</html>", "", content, flags=_re.IGNORECASE)
-    content = _re.sub(r"<head[^>]*>.*?</head>", "", content, flags=_re.IGNORECASE | _re.DOTALL)
-    content = _re.sub(r"<body[^>]*>", "", content, flags=_re.IGNORECASE)
+    content = _strip_head(content)
+    content = _rewrite_tags(content, _OPEN_BODY, lambda _m, _inner: "")
     content = _re.sub(r"</body>", "", content, flags=_re.IGNORECASE)
-    content = _re.sub(r"<meta[^>]*/?>", "", content, flags=_re.IGNORECASE)
+    content = _rewrite_tags(content, _OPEN_META, lambda _m, _inner: "")
     # Close void tags for XHTML
     content = _re.sub(r"<hr\s*/?>", "<hr/>", content, flags=_re.IGNORECASE)
     content = _re.sub(r"<br\s*/?>", "<br/>", content, flags=_re.IGNORECASE)
-    content = _re.sub(r"<img([^>]*?)/?>", r"<img\1/>", content, flags=_re.IGNORECASE)
-    content = _re.sub(r"<input([^>]*?)/?>", r"<input\1/>", content, flags=_re.IGNORECASE)
+    content = _rewrite_tags(content, _OPEN_IMG, lambda _m, inner: f"<img{inner.removesuffix('/')}/>")
+    content = _rewrite_tags(content, _OPEN_INPUT, lambda _m, inner: f"<input{inner.removesuffix('/')}/>")
     # Escape lone ampersands (not already-encoded entities) — no double-escape
     content = _re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)", "&amp;", content)
     # Drop emojis (break ALM XML)
@@ -1133,7 +1234,122 @@ def sanitize_html_to_xhtml(html: str) -> str:
     content = _re.sub(r"[\u2600-\u27BF]", "", content)
     content = _re.sub(r"[\U0001FA00-\U0001FA6F]", "", content)
     content = _re.sub(r"[\U0001F300-\U0001F5FF]", "", content)
-    return content.strip()
+    content = _drop_astral(content)
+    return _unwrap_root_div(content.strip())
+
+
+def _drop_astral(text: str) -> str:
+    """Remove characters above U+FFFF (emoji and other astral code points) and lone surrogates; they break the ALM XML."""
+    return "".join(ch for ch in text if not (ord(ch) > 0xFFFF or 0xD800 <= ord(ch) <= 0xDFFF))
+
+
+_ROOT_OPEN = _re.compile(rf"""<div\s+xmlns=(?:"{_re.escape(_XHTML_NS)}"|'{_re.escape(_XHTML_NS)}')\s*>""")
+_DIV_CLOSE = _re.compile(r"</div\s*>", _re.IGNORECASE)
+_DIV_OPEN = _re.compile(r"<(/?)div\b", _re.IGNORECASE)
+
+
+def _div_tokens(text: str):
+    """(start, end, is_closing, is_self_closing) of every ``<div ...>`` / ``</div>`` tag, in linear time."""
+    pos = 0
+    while (m := _DIV_OPEN.search(text, pos)) is not None:
+        gt = text.find(">", m.end())
+        if gt == -1:
+            return
+        yield m.start(), gt + 1, bool(m.group(1)), text[m.end() : gt].endswith("/")
+        pos = gt + 1
+
+
+def _unwrap_root_div(content: str) -> str:
+    """Remove every XHTML root ``<div xmlns=...>`` that wraps the whole content, so the caller wraps once.
+
+    One linear pass: the div tags are paired once with a stack, then the levels are peeled from the outside in, each
+    only while its matching close is the very end of what is left (a div that closes earlier is not a root).
+    """
+    tokens = list(_div_tokens(content))
+    match: dict[int, int] = {}
+    stack: list[int] = []
+    for i, (_s, _e, closing, self_closing) in enumerate(tokens):
+        if self_closing:
+            continue
+        if not closing:
+            stack.append(i)
+        elif stack:
+            match[stack.pop()] = i
+        else:
+            return content  # unbalanced: leave it for the well-formedness check
+    if stack:
+        return content
+    lo, hi = 0, len(content)
+    for i, (start, end, closing, self_closing) in enumerate(tokens):
+        if closing or self_closing or start != lo or _ROOT_OPEN.fullmatch(content, start, end) is None:
+            break
+        j = match[i]
+        close_start, close_end = tokens[j][0], tokens[j][1]
+        if close_end != hi or _DIV_CLOSE.fullmatch(content, close_start, close_end) is None:
+            break
+        lo, hi = end, close_start
+        while lo < hi and content[lo].isspace():
+            lo += 1
+        while hi > lo and content[hi - 1].isspace():
+            hi -= 1
+    return content[lo:hi]
+
+
+CONTENT_FORMATS = ("html", "xhtml", "markdown")
+
+
+def _max_content_bytes() -> int:
+    """ELM_RM_MAX_CONTENT_BYTES (default 1 MB), read per call; an invalid or non-positive value falls back."""
+    try:
+        value = int(os.environ.get("ELM_RM_MAX_CONTENT_BYTES", "").strip())
+    except ValueError:
+        return 1_048_576
+    return value if value > 0 else 1_048_576
+
+
+def _reject_markup_literals(text: str) -> None:
+    lowered = text.lower()
+    for token, label in (
+        ("<!--", "a comment (<!--)"),
+        ("<![cdata[", "a CDATA section (<![CDATA[)"),
+        ("<?", "a processing instruction (<?)"),
+    ):
+        if token in lowered:
+            raise ValueError(
+                f"requirement content contains {label}, which is not accepted (the update edits the text by pattern "
+                "and it would be fragile); remove it."
+            )
+
+
+def _check_content(content: str | None, content_format: str) -> None:
+    limit = _max_content_bytes()
+    if content and len(content) > limit // 4 and len(content.encode("utf-8", "replace")) > limit:
+        raise ValueError(
+            f"requirement content is larger than {limit} bytes; shorten it or raise ELM_RM_MAX_CONTENT_BYTES."
+        )
+    if content_format != "markdown" and content:
+        _reject_markup_literals(content)
+
+
+def prepare_content(content: str, content_format: str = "html") -> str:
+    """Normalize requirement content to well-formed XHTML WITHOUT the root div (the RDF builder wraps once).
+
+    ``html`` is sanitized, ``xhtml`` is only validated (and unwrapped), ``markdown`` is converted. Raises ValueError
+    for an unknown format or content that is not well-formed; callers run it before any request.
+    """
+    if content_format not in CONTENT_FORMATS:
+        raise ValueError(f"Invalid content_format '{content_format}'. Must be one of: {', '.join(CONTENT_FORMATS)}.")
+    _check_content(content, content_format)
+    if content_format == "html":
+        clean = sanitize_html_to_xhtml(content)
+    elif content_format == "markdown":
+        clean = _unwrap_root_div(_drop_astral(markdown_to_xhtml(content or "")).strip())
+    else:
+        clean = _unwrap_root_div(_drop_astral(content or "").strip())
+    if content_format != "markdown":
+        _reject_markup_literals(clean)
+    _assert_xhtml_wellformed(clean)
+    return clean
 
 
 async def _find_requirement_factory(project_url: str) -> str:
@@ -1358,12 +1574,14 @@ async def create_requirement(
     folder: str | None = None,
     shape: str | None = None,
     if_exists: str = "error",
+    content_format: str = "html",
 ) -> dict:
     """Create an RM requirement via OSLC POST to the requirementFactory.
 
     Resolves the project, requires and resolves ``shape`` (URI or type title, D7),
-    discovers the factory, sanitizes nothing here (the caller passes already-sanitized
-    XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
+    discovers the factory, normalizes ``xhtml`` per ``content_format`` (html | xhtml | markdown, see
+    prepare_content; validated before any request, idempotent for content already wrapped in the root div),
+    builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
     Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
     Before the POST, a requirement with the same title (the server compares it exactly; case and inner spaces
     count), type and folder is looked up (see create_idempotent, ``if_exists``); the result carries ``created``.
@@ -1372,22 +1590,67 @@ async def create_requirement(
     Returns {"uri": ..., "identifier": ..., "created": ...}, the identifier re-read from the server (D8). If the
     re-read fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier
     (or None) and a short ``warning`` key, and logs a warning.
-    Raises ValueError if the project does not exist or the type is missing/unknown.
+    Only after an explicit 403 of the POST, and with content larger than ELM_RM_CREATE_FALLBACK_BYTES (default
+    4096), the requirement is created without text and the content goes by PUT (see _create_in_two_steps); the
+    result then carries ``content_applied``. Raises ValueError if the project does not exist or the type is
+    missing/unknown.
     """
     check_if_exists(if_exists)
+    xhtml = prepare_content(xhtml, content_format)
     project_url = await _resolve_project_url("rm", project)
     shape = await _resolve_requirement_shape(project, shape)
     factory_url = await _find_requirement_factory(project_url)
-    _assert_xhtml_wellformed(xhtml)
     rdf_body = _requirement_to_rdfxml(title, xhtml, shape=shape, folder=folder)
 
     async def find() -> list[dict]:
         return await _find_rm_duplicates(project, title, shape, folder)
 
     async def create() -> dict:
-        return await _post_requirement(factory_url, rdf_body)
+        try:
+            return await _post_requirement(factory_url, rdf_body)
+        except WriteRejected as exc:
+            if exc.status_code != 403 or len(xhtml.encode("utf-8")) <= _create_fallback_bytes():
+                raise
+        # Explicit 403: nothing was created. One more POST, without the text, then the content by PUT.
+        minimal = _requirement_to_rdfxml(title, "", shape=shape, folder=folder)
+        return await _apply_content_after_create(await _post_requirement(factory_url, minimal), xhtml)
 
     return await create_idempotent(if_exists, find, create, "requirement")
+
+
+def _create_fallback_bytes() -> int:
+    """ELM_RM_CREATE_FALLBACK_BYTES (default 4096), read per call; an invalid or non-positive value falls back to the default."""
+    try:
+        value = int(os.environ.get("ELM_RM_CREATE_FALLBACK_BYTES", "").strip())
+    except ValueError:
+        return 4096
+    return value if value > 0 else 4096
+
+
+async def _apply_content_after_create(created: dict, xhtml: str) -> dict:
+    """Second step of the 2-step creation: PUT the full content (fresh ETag, If-Match) and re-read to confirm.
+
+    A failure here never deletes or re-POSTs: the requirement exists, so the result says so (``uri``) with
+    ``content_applied`` False and a ``warning``.
+    """
+    uri = created.get("uri")
+    try:
+        if not uri:
+            raise ValueError("the server returned no Location for the new requirement")
+        updated = await update_requirement(uri, xhtml=xhtml, content_format="xhtml")
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("create_requirement: created %s but applying the content failed (%s)", uri, exc)
+        return {
+            **created,
+            "content_applied": False,
+            "warning": f"The requirement was created ({uri}) but its content was not applied: {exc}. Nothing was "
+            "deleted and the creation was not repeated; apply the content with update_requirement.",
+        }
+    result = {**created, "content_applied": True}
+    result["identifier"] = updated.get("identifier") or created.get("identifier")
+    if updated.get("warning"):
+        result["warning"] = updated["warning"]
+    return result
 
 
 async def _post_requirement(factory_url: str, rdf_body: str) -> dict:
@@ -1472,14 +1735,31 @@ async def delete_requirement(uri: str) -> dict:
     raise ValueError(f"Could not confirm the deletion of {uri}")
 
 
-async def update_requirement(uri: str, title: str | None = None, xhtml: str | None = None) -> dict:
+def _replace_primary_text(body: str, primary_content: str) -> str:
+    """Swap the content of jazz_rm:primaryText, ending at its LAST closing tag (a server-side comment inside the
+    literal may hold a ``</jazz_rm:primaryText>`` of its own that a non-greedy match would stop at)."""
+    open_m = _re.search(r"<jazz_rm:primaryText[^>]*>", body)
+    if open_m is not None and open_m.group(0).endswith("/>"):  # an empty, self-closing literal
+        tag = f'<jazz_rm:primaryText rdf:parseType="Literal">{primary_content}</jazz_rm:primaryText>'
+        return body[: open_m.start()] + tag + body[open_m.end() :]
+    close = body.rfind("</jazz_rm:primaryText>")
+    if open_m is None or close < open_m.end():
+        raise ValueError("could not locate the content of jazz_rm:primaryText in the requirement")
+    return body[: open_m.end()] + primary_content + body[close:]
+
+
+async def update_requirement(
+    uri: str, title: str | None = None, xhtml: str | None = None, content_format: str = "html"
+) -> dict:
     """Update an RM requirement via OSLC PUT with If-Match (ETag).
 
     GETs the resource as rdf+xml for its ETag, edits the XML as a string
     preserving parseType="Literal" (mirrors publicar_elm.atualizar_requisito),
     then PUTs with If-Match. Accepts 200/204. On 412 raises ValueError signalling
-    an ETag conflict (the @tool boundary converts it to a legible ToolError).
+    an ETag conflict (the @tool boundary converts it to a legible ToolError). ``xhtml`` is normalized per
+    ``content_format`` (html | xhtml | markdown) BEFORE any request; a root div already in it is not doubled.
     """
+    clean = prepare_content(xhtml, content_format) if xhtml is not None else None
     client = await get_client()
     get_resp = await fetch(
         client,
@@ -1492,8 +1772,6 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely update.")
     xml_content = get_resp.text
-    if xhtml is not None:
-        _assert_xhtml_wellformed(sanitize_html_to_xhtml(xhtml))
 
     # Edit ONLY inside the target resource's <rdf:Description> block, not the
     # first/any match in the whole document (a GET may return several Descriptions
@@ -1521,17 +1799,10 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
             flags=_re.DOTALL,
         )
 
-    if xhtml is not None:
-        clean = sanitize_html_to_xhtml(xhtml)
+    if clean is not None:
         primary_content = f'<div xmlns="http://www.w3.org/1999/xhtml">{clean}</div>'
         if "jazz_rm:primaryText" in body:
-            body = _re.sub(
-                r"(<jazz_rm:primaryText[^>]*>)(.*?)(</jazz_rm:primaryText>)",
-                lambda t: t.group(1) + primary_content + t.group(3),
-                body,
-                count=1,
-                flags=_re.DOTALL,
-            )
+            body = _replace_primary_text(body, primary_content)
         else:
             primary_tag = f'<jazz_rm:primaryText rdf:parseType="Literal">{primary_content}</jazz_rm:primaryText>'
             body = body + f"    {primary_tag}\n  "
@@ -1565,6 +1836,11 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
             headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
         )
         result["identifier"] = _extract_identifier(reread.text) or result["identifier"]
+        if etag and reread.headers.get("ETag") == etag:
+            result["warning"] = (
+                "The PUT was accepted, but the re-read returned the same ETag as before the update; the change "
+                "may not have been applied. Check the requirement before retrying."
+            )
     except (ValueError, RuntimeError, httpx.HTTPError) as exc:
         logger.warning("update_requirement: updated %s but the re-read failed (%s)", uri, exc)
         result["warning"] = "Requirement updated, but re-reading it failed; the identifier may be missing."

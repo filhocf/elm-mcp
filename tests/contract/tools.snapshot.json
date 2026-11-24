@@ -130,6 +130,12 @@
           "type": "string",
           "required": false,
           "default": "error"
+        },
+        {
+          "name": "content_format",
+          "type": "string",
+          "required": false,
+          "default": "html"
         }
       ]
     },
@@ -835,6 +841,12 @@
           "type": "null|string",
           "required": false,
           "default": null
+        },
+        {
+          "name": "content_format",
+          "type": "string",
+          "required": false,
+          "default": "html"
         }
       ]
     },

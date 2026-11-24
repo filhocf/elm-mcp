@@ -49,14 +49,17 @@ Creating a requirement needs a target folder and (optionally) a specific require
 4. **Resolve the folder URI.** `list_folders(project)` returns `[{"title", "uri"}]`; take the
    `uri` of your target folder for `create_requirement(folder=...)`.
 5. **Create.** `create_requirement(project, title, content, folder=None, type=None)`.
-   `content` is **HTML** — it is sanitized to XHTML and stored in `jazz_rm:primaryText`.
+   `content` is **HTML** by default — sanitized to XHTML and stored in `jazz_rm:primaryText`.
+   To send **Markdown**, pass `content_format="markdown"` (headings, lists, tables, code,
+   emphasis, links and images by http/https URL; raw HTML is escaped). `content_format="xhtml"`
+   only validates. A root `<div xmlns=...>` already in the content is not doubled.
    If you omit `type`/`folder`, the server uses defaults for the project area.
 
 ### Update
 
 6. **Update.** `update_requirement(uri, title=None, content=None)` performs an OSLC PUT with
    an ETag (handled for you). Pass the requirement's OSLC URI and only the fields you want to
-   change; `content` is again HTML sanitized to XHTML.
+   change; `content` follows the same `content_format` (html, xhtml, markdown).
 
 ## Examples
 
@@ -102,7 +105,7 @@ update_requirement(
 
 - **`type` is an `instanceShape` URI, not a title.** Resolve the requirement kind via
   `list_types(domain="rm", ...)` and pass its `shape_uri`. Passing a title will not work.
-- **`content` is HTML.** It is sanitized to XHTML before being stored in
+- **`content` is HTML by default** (or Markdown with `content_format="markdown"`). It is sanitized to XHTML before being stored in
   `jazz_rm:primaryText`; well-formed fragments (`<p>…</p>`, lists, etc.) are safest.
 - **`folder` is a URI** from `list_folders`, not a folder name.
 - **Update is partial.** `update_requirement` only changes the fields you pass; omit what you
