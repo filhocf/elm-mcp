@@ -770,6 +770,8 @@ async def _find_current_iteration(project_url: str) -> str | None:
 
 def _payload_to_rdfxml(payload: dict) -> str:
     """Convert a payload dict to RDF/XML format for OSLC resource creation."""
+    from xml.sax.saxutils import quoteattr
+
     # Namespace prefixes used in payloads
     ns_map = {
         "dcterms": "http://purl.org/dc/terms/",
@@ -783,11 +785,11 @@ def _payload_to_rdfxml(payload: dict) -> str:
     elements = []
     for key, value in payload.items():
         if isinstance(value, dict) and "rdf:resource" in value:
-            elements.append(f'  <{key} rdf:resource="{value["rdf:resource"]}"/>')
+            elements.append(f"  <{key} rdf:resource={quoteattr(str(value['rdf:resource']))}/>")
         elif isinstance(value, list):
             for item in value:
                 if isinstance(item, dict) and "rdf:resource" in item:
-                    elements.append(f'  <{key} rdf:resource="{item["rdf:resource"]}"/>')
+                    elements.append(f"  <{key} rdf:resource={quoteattr(str(item['rdf:resource']))}/>")
         else:
             from xml.sax.saxutils import escape
 
@@ -2233,6 +2235,12 @@ async def list_folders(project: str) -> list[dict]:
 # ---------------------------------------------------------------------------------------------
 _PROCESS_NS = "http://jazz.net/xmlns/prod/jazz/process/0.6/"
 _TEAM_URL_PATH_RE = _re.compile(r"^/ccm/process/project-areas/[^/]+/team-areas/([^/?#]+)$")
+_SAFE_ID_RE = _re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _is_safe_id(value: str) -> bool:
+    """A path-segment id that is safe in a URI and in an XML attribute: ``[A-Za-z0-9_.-]+``, not ``.``/``..``."""
+    return _SAFE_ID_RE.fullmatch(value) is not None and value not in (".", "..")
 
 
 def _server_origin() -> str:
@@ -2247,7 +2255,7 @@ def _parse_team_areas(xml_text: str) -> list[dict]:
     URL on another origin or not shaped ``.../team-areas/{id}`` are dropped. The URIs are built on the
     configured origin from the id; nothing taken from the response is requested.
     """
-    if "<!DOCTYPE" in xml_text or "<!ENTITY" in xml_text:
+    if "<!doctype" in xml_text.lower() or "<!entity" in xml_text.lower():
         raise ValueError("invalid team-areas response: DTD/entity declarations are not accepted")
     try:
         root = ET.fromstring(xml_text)
@@ -2270,6 +2278,8 @@ def _parse_team_areas(xml_text: str) -> list[dict]:
         if match is None:
             continue
         team_id = match.group(1)
+        if not _is_safe_id(team_id):
+            continue
         archived = (block.findtext(f"{{{_PROCESS_NS}}}archived") or "").strip().lower() == "true"
         teams.append(
             {
@@ -2298,7 +2308,10 @@ async def list_teams(project: str, include_archived: bool = False, refresh: bool
         return _parse_team_areas(resp.text)
 
     with cache.refresh_scope(refresh):
-        pa_id = _project_area_id(await _resolve_project_url("ccm", project))
+        project_url = await _resolve_project_url("ccm", project)
+        pa_id = _project_area_id(project_url)
+        if "/contexts/" not in project_url or not _is_safe_id(pa_id):
+            raise ValueError(f"cannot extract the project area id from {project_url}")
         teams = await cache.get_or_fetch(pa_id, "teams", lambda: load(pa_id))
     items = sorted((t for t in teams if include_archived or not t["archived"]), key=lambda t: t["name"].casefold())
     return {"items": items, "total": len(items)}

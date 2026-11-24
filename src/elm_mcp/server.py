@@ -1021,7 +1021,9 @@ async def list_teams(project: str, include_archived: bool = False, refresh: bool
         refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
 
     Returns {"items": [{"name", "id", "uri", "process_uri", "archived"}], "total"}, sorted by name.
-    "uri" is the rtc_cm:teamArea value: pass it in create_workitem(custom_fields=...) or set_field.
+    "uri" is the rtc_cm:teamArea value, meant for create_workitem(custom_fields=...) and
+    update_workitem(custom_fields=...) as {"rtc_cm:teamArea": {"rdf:resource": uri}}. Writing the team this way
+    is NOT validated live yet (pending live acceptance).
     """
     return await oslc.list_teams(project, include_archived, refresh)
 

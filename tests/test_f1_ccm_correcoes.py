@@ -884,3 +884,35 @@ async def test_g5l2_list_types_unescapes_html_entities_in_factory_title(monkeypa
     _mock_property_only_shapes()
     by_id = {r["id"]: r for r in await list_types("ccm", PROJECT)}
     assert by_id[DEBT_ID]["title"] == "R&D"
+
+
+# ======================================================================
+# G5 review: rdf:resource attribute escaping + rtc_cm:teamArea in the POST
+# ======================================================================
+def test_payload_to_rdfxml_escapes_rdf_resource_values():
+    """A `"`, `&` or `<` in rdf:resource (single or list) neither injects an attribute nor breaks the XML."""
+    evil = 'x" a="1&<b>'
+    xml = oslc._payload_to_rdfxml(
+        {"rtc_cm:teamArea": {"rdf:resource": evil}, "rtc_cm:related": [{"rdf:resource": evil}]}
+    )
+    root = ET.fromstring(xml)
+    for el in root.iter():
+        if el.tag.endswith("teamArea") or el.tag.endswith("related"):
+            assert el.attrib == {f"{NS_RDF}resource": evil}
+
+
+@respx.mock
+async def test_create_workitem_posts_rtc_cm_team_area_as_rdf_resource():
+    _setup_create()
+    uri = f"{BASE}/ccm/oslc/teamareas/_TEAM00000000000000000A"
+    await create_workitem(
+        project=PROJECT,
+        title="T",
+        type="task",
+        custom_fields={"rtc_cm:teamArea": {"rdf:resource": uri}},
+        if_exists="create",
+    )
+    body = _posted_body()
+    assert f'<rtc_cm:teamArea rdf:resource="{uri}"/>' in body
+    elements = list(ET.fromstring(body).iter("{http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/}teamArea"))
+    assert [e.get(f"{NS_RDF}resource") for e in elements] == [uri]

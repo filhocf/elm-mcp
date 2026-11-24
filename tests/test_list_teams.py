@@ -500,3 +500,37 @@ def test_the_contract_snapshot_lists_list_teams():
             {"name": "refresh", "type": "boolean", "required": False, "default": False},
         ],
     }
+
+
+# ======================================================================
+# 6. Hardening (G5 review): safe ids, DOCTYPE case, project area id
+# ======================================================================
+@pytest.mark.parametrize(
+    "bad_id",
+    ['x" a="1', "..", ".", "%2e%2e", "a b", "é", "a%2Fb", "a%0d%0ab", "a&b", "a<b"],
+    ids=["quote", "dotdot", "dot", "pct-dotdot", "space", "non-ascii", "pct-slash", "pct-crlf", "amp", "lt"],
+)
+async def test_team_ids_outside_the_safe_charset_are_dropped(env, bad_id):
+    from xml.sax.saxutils import escape
+
+    mock_teams(env, doc(team_xml("Good", team_url(TEAM_A)), team_xml("Bad", escape(team_url(bad_id)))))
+    result = await server.list_teams(PROJECT)
+    assert [i["id"] for i in result["items"]] == [TEAM_A]
+
+
+@pytest.mark.parametrize("prefix", ["<!--<!DOCTYPE-->", "<!doctype x>", "<!DocType x>", "<!entity a 'b'>"])
+async def test_doctype_in_any_case_or_after_a_comment_is_refused(env, prefix):
+    mock_teams(env, doc(team_xml("Good", team_url(TEAM_A)), prefix=prefix))
+    with pytest.raises(ToolError, match=r"(?i)dtd|entity"):
+        await server.list_teams(PROJECT)
+
+
+@pytest.mark.parametrize(
+    "sp_url",
+    [f"{BASE}/ccm/oslc/workitems/catalog/", f"{BASE}/ccm/oslc/contexts/"],
+    ids=["catalog-slash", "contexts-empty"],
+)
+async def test_an_unextractable_project_area_id_is_a_clear_error(w2_router, sp_url):
+    mock_env(w2_router, providers=[(PROJECT, sp_url)])
+    with pytest.raises(ToolError, match=r"cannot extract the project area id from"):
+        await server.list_teams(PROJECT)

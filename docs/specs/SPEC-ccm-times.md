@@ -14,7 +14,7 @@ Criar work item exige `team_area`/`filed_against` válidos por project area. Hoj
 6. Fixture sanitizada (estrutura real, nomes e ids sintéticos): `tests/fixtures/ccm_process_team_areas.xml`.
 
 ## Decisão
-Rota: **Process REST** (item 2), por project area, uma chamada. É a API de processo documentada da Jazz, não serviço interno. O resultado devolve, por time: `name`, `id`, `uri` (= `rtc_cm:teamArea`, a forma `/ccm/oslc/teamareas/{id}` pronta para `create_workitem(custom_fields=...)`/`set_field`), `process_uri` (`/ccm/process/team-areas/{id}`) e `archived`. Times arquivados ficam de fora por padrão (`include_archived=False`).
+Rota: **Process REST** (item 2), por project area, uma chamada. É a API de processo documentada da Jazz, não serviço interno. O resultado devolve, por time: `name`, `id`, `uri` (= `rtc_cm:teamArea`, a forma `/ccm/oslc/teamareas/{id}` destinada a `create_workitem(custom_fields=...)` e `update_workitem(custom_fields=...)`; a escrita com `rtc_cm:teamArea` NÃO foi validada ao vivo, fica para a aceitação viva; `set_field` não serve: manda string simples), `process_uri` (`/ccm/process/team-areas/{id}`) e `archived`. Times arquivados ficam de fora por padrão (`include_archived=False`).
 
 ## Critério de aceite (EARS) — ajustado pelo G0
 - QUANDO `list_teams(project, include_archived=False, refresh=False)` for chamado, o sistema DEVE devolver `{"items": [{name, id, uri, process_uri, archived}], "total"}`, ordenado por `name` (casefold), sem os arquivados salvo `include_archived=True`.
