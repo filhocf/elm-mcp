@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?><jp06:team-areas xmlns:jp06="http://jazz.net/xmlns/prod/jazz/process/0.6/">
+ <jp06:team-area jp06:name="Team Alpha">
+  <jp06:summary/>
+  <jp06:description/>
+  <jp06:url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A/team-areas/_TEAM00000000000000000A</jp06:url>
+  <jp06:roles-url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A/team-areas/_TEAM00000000000000000A/roles</jp06:roles-url>
+  <jp06:members-url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A/team-areas/_TEAM00000000000000000A/members</jp06:members-url>
+  <jp06:archived>false</jp06:archived>
+  <jp06:project-area-url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A</jp06:project-area-url>
+ </jp06:team-area>
+ <jp06:team-area jp06:name="Team Beta">
+  <jp06:summary/>
+  <jp06:description/>
+  <jp06:url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A/team-areas/_TEAM00000000000000000B</jp06:url>
+  <jp06:archived>false</jp06:archived>
+  <jp06:project-area-url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A</jp06:project-area-url>
+ </jp06:team-area>
+ <jp06:team-area jp06:name="Old Team">
+  <jp06:summary/>
+  <jp06:description/>
+  <jp06:url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A/team-areas/_TEAM00000000000000000C</jp06:url>
+  <jp06:archived>true</jp06:archived>
+  <jp06:project-area-url>https://elm.example.com/ccm/process/project-areas/_PA0000000000000000000A</jp06:project-area-url>
+ </jp06:team-area>
+</jp06:team-areas>
