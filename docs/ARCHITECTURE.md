@@ -67,7 +67,7 @@ capabilities (RM write, discovery tools, OSLC links, QM write, reporting) are tr
 
 ## Constraints
 
-- SSL verification is currently disabled for internal certificates (configurable path on the roadmap).
+- TLS verification is on by default; internal CAs via `ELM_CA_BUNDLE`, opt-out via `ELM_VERIFY_TLS=false`.
 - Single-server configuration via environment or credentials file.
 - Creating iterations/sprints is not possible via OSLC CCM (manual in EWM); the MCP only links
   (`plannedFor`).

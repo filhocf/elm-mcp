@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import os
+import ssl
 import weakref
 
 import httpx
@@ -13,6 +15,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 _client: httpx.AsyncClient | None = None
+_tls_warned = False  # the "TLS verification disabled" warning is logged once per process
+_VERIFY_OFF = {"false", "0", "no", "off"}
 
 
 class SessionState:
@@ -47,12 +51,39 @@ async def _refuse_foreign_redirect(response: httpx.Response) -> None:
         assert_same_origin(str(response.url.join(location)))
 
 
+def _tls_verify() -> ssl.SSLContext | bool:
+    """TLS setting for httpx from the environment; verification is on unless explicitly disabled.
+
+    ELM_VERIFY_TLS in {false,0,no,off} disables it (wins over ELM_CA_BUNDLE); ELM_CA_BUNDLE is a CA file
+    path, or "system" for the OS trust store.
+    """
+    global _tls_warned
+    if os.environ.get("ELM_VERIFY_TLS", "").strip().lower() in _VERIFY_OFF:
+        if not _tls_warned:
+            _tls_warned = True
+            logging.getLogger(__name__).warning(
+                "TLS certificate verification is DISABLED (ELM_VERIFY_TLS=%s): connections are open to "
+                "man-in-the-middle attacks. Prefer ELM_CA_BUNDLE.",
+                os.environ["ELM_VERIFY_TLS"],
+            )
+        return False
+    bundle = os.environ.get("ELM_CA_BUNDLE", "").strip()
+    if not bundle:
+        return True  # httpx default: verify against the certifi bundle
+    if bundle.lower() == "system":
+        return ssl.create_default_context()
+    if not os.path.isfile(bundle):
+        raise ValueError(f"ELM_CA_BUNDLE points to a file that does not exist: {bundle}")
+    return ssl.create_default_context(cafile=bundle)
+
+
 async def get_client() -> httpx.AsyncClient:
     """Get authenticated httpx client, re-authenticating if needed."""
     global _client
     if _client is None:
+        verify = _tls_verify()
         client = httpx.AsyncClient(
-            verify=False,
+            verify=verify,
             timeout=60.0,
             follow_redirects=True,
             event_hooks={"response": [_refuse_foreign_redirect]},

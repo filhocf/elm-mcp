@@ -76,6 +76,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- **BREAKING (#71):** TLS certificate verification is now ON by default (it was always off). For a server with an internal CA, set `ELM_CA_BUNDLE=/path/to/ca.pem` (or `ELM_CA_BUNDLE=system` for the OS trust store); a missing file is a `ValueError` naming `ELM_CA_BUNDLE`. To keep the old behavior, set `ELM_VERIFY_TLS=false` (also `0`, `no`, `off`; it wins over `ELM_CA_BUNDLE` and logs one warning per process). `elm-mcp login` follows the same settings.
 - `search_requirements` now returns interpreted items (`uri`, `title`, `identifier`, `type`, `modified`, `folder`) instead of the raw RDF/JSON dictionary: a deliberate change of return.
 - RM queries discover the project's stream and send `Configuration-Context`, `oslc.prefix` (dcterms, oslc, rdf, nav, jazz_rm) and `oslc.select`; a project without a stream is queried without the header.
 - `if_exists` defaults to `error`: creating a requirement or work item whose title, type and folder or parent already exist is now refused. Pass `if_exists="create"` for the old behavior (deliberate incompatible change).
@@ -109,6 +110,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Fixed
 
+- Password decoding no longer guesses (#70): the `password` in `~/.elm_creds.json` is always base64 (as written by `elm-mcp login`) and always decoded as UTF-8, with a clear error if it is not valid; `ELM_PASSWORD` is used as is, and decoded as base64 only with an explicit `b64:` prefix. A plaintext password that happens to look like base64, or a stored one with non-ASCII or control characters, no longer comes out corrupted.
 - `search_requirements` no longer answers 400 (`Undefined namespace prefix` / null configuration) on RM queries with `oslc.where`.
 - `search_requirements` returns one item per requirement instead of one giant raw dictionary, and takes the total from "Query Results: N".
 

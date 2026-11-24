@@ -18,18 +18,15 @@ def _load_creds_file() -> dict:
 
 
 def _decode_password(value: str) -> str:
-    """Decode password — supports plaintext or base64-encoded."""
+    """Decode the base64 password stored in ~/.elm_creds.json (always base64, written by ``cli.login``)."""
     if not value:
         return value
     try:
-        decoded = base64.b64decode(value, validate=True).decode()
-        # Heuristic: if decoded is printable ASCII, it was base64
-        if decoded.isprintable():
-            return decoded
-    except (binascii.Error, ValueError, UnicodeDecodeError):
-        # Not valid base64 (plaintext password) — fall through and return as-is.
-        pass
-    return value
+        return base64.b64decode(value, validate=True).decode("utf-8")
+    except (binascii.Error, ValueError) as exc:  # UnicodeDecodeError is a ValueError
+        raise ValueError(
+            "Invalid 'password' in ~/.elm_creds.json: expected base64 of a UTF-8 string. Run 'elm-mcp login' again."
+        ) from exc
 
 
 class Settings(BaseSettings):
@@ -50,9 +47,13 @@ class Settings(BaseSettings):
                     url = creds.get("url")
                     if url:
                         object.__setattr__(self, "elm_url", url)
-        else:
-            # Decode password from env var (may be base64)
-            object.__setattr__(self, "elm_password", _decode_password(self.elm_password))
+        elif self.elm_password.startswith("b64:"):
+            # ELM_PASSWORD is used as is; base64 only with the explicit "b64:" prefix
+            try:
+                decoded = base64.b64decode(self.elm_password[4:], validate=True).decode("utf-8")
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("Invalid ELM_PASSWORD: 'b64:' must be followed by base64 of a UTF-8 string.") from exc
+            object.__setattr__(self, "elm_password", decoded)
 
 
 settings = Settings()
