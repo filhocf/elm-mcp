@@ -1,6 +1,6 @@
 # SPEC — RM: conteúdo do requisito (XHTML idempotente, entrada Markdown, criação em 2 passos)
 
-**Status:** DONE em G4/G5 (PR #74, draft; 2 loops de revisão + ajuste final verificado pelo gerente); aceitação viva de escrita pendente · **Release:** v0.7.0 · **Origem das ideias:** fluxos documentados do jandaia (`publicar_elm`) e a correção de div raiz do cadu-ia (rm-server), reescritos aqui; nenhum código copiado (ADR-006)
+**Status:** DONE em G4/G5 (PR #73, draft; 2 loops de revisão + ajuste final verificado pelo gerente); aceitação viva de escrita pendente · **Release:** v0.7.0 · **Origem das ideias:** fluxos documentados do jandaia (`publicar_elm`) e a correção de div raiz do cadu-ia (rm-server), reescritos aqui; nenhum código copiado (ADR-006)
 
 ## Contexto
 - O RM só aceita o corpo em `jazz_rm:primaryText` como literal XHTML bem formado, com um `<div xmlns="http://www.w3.org/1999/xhtml">` na raiz. O conteúdo entra sem escape dentro do RDF/XML.
