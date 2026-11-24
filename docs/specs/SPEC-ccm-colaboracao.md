@@ -1,6 +1,6 @@
 # SPEC — Colaboração CCM: comentários, links, campos e consultas
 
-**Status:** G4 GREEN (respx, W2) — aceitação viva pendente · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
+**Status:** G4 GREEN (respx, W2); aceitação viva PARCIAL feita em 24/nov/2026 (ver 'Resultado da aceitação viva') · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
 
 ## Tools novas ou ampliadas
 | Tool | Como (verificado no servidor de referência) |
@@ -22,6 +22,11 @@
 ## Aceitação viva
 Em itens descartáveis: comentar e reler; criar e remover `depends_on` e `related`; re-parent; gravar pontos por título ("5 pts").
 
+### Resultado da aceitação viva (24/nov/2026, servidor de referência, itens descartáveis; as tarefas e o IB foram cancelados ao fim)
+- **Confirmado:** `add_comment` + `list_comments` (o comentário volta com `id`, `author`, `created`, `text`); `link_workitems` e `unlink_workitems` com `related` e `depends_on` (vincular, repetir devolve `changed: false`, desvincular, desvincular de novo é erro); `set_field` de campo enumerado por id (`complexity` = `5`, valor gravado como `{"rdf:resource": ...}`); criação de tarefa com `parent_id` (o IB lista a filha em `children`); `list_workitems(type=...)`.
+- **Achado:** `list_comments` devolve o texto como o servidor guarda, escapado em HTML (`&lt;b&gt;`): issue #81.
+- **NÃO exercitado ao vivo:** re-parent (`parent`), `blocks`, `duplicate_of`, `resolves`, pontos por título (`5 pts`), filtro `planned_for`.
+
 ## Gates
 G3 (respx: 405 na 2.0, 201 na 1.0, preservação de links) → G4 → G5 → aceitação viva.
 
@@ -41,7 +46,7 @@ O `list_workitems` resolve `type` (título/alias/id) pela descoberta de tipos e 
 vale junto de `type` (resolvido pelo workflow), senão erro pedindo o id (use `list_workflow`).
 
 ## A confirmar na aceitação viva (to be confirmed in live acceptance)
-- Corpo de um comentário individual (`dcterms:identifier`/`creator`/`created`/`description`) e a resposta do POST (`rdf:about`).
-- Formato do documento `allowedValues` da enumeração usado por `set_field` e o título do literal "Unassigned".
+- ~~Corpo de um comentário individual e a resposta do POST~~: confirmado em 24/nov/2026 (volta `id`, `author`, `created`, `text`; o texto vem escapado em HTML, issue #81).
+- Formato do documento `allowedValues` da enumeração usado por `set_field`: o valor por id foi confirmado em 24/nov/2026; os rótulos vêm da enumeração (#77, mergeado); o título do literal "Unassigned" segue sem verificação.
 - Que o serviço de consulta aceita `rtc_cm:plannedFor=<URI>` em `oslc.where` (os demais filtros foram verificados).
 - `parent` substitui o pai atual (um item tem um só pai): confirmar no re-parent.

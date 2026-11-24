@@ -30,7 +30,7 @@ Só o que tem evidência de escrita real entra:
 - ONDE o ETM exigir dado fora do OSLC, o sistema DEVE documentar a limitação e NÃO DEVE falhar em silêncio.
 - O sistema NÃO DEVE reenviar o POST de criação após falha ambígua; DEVE reconsultar duplicata (título + tipo) como em `SPEC-idempotencia`, com `if_exists`.
 
-## Aceitação viva (PENDENTE: escrita suspensa)
+## Aceitação viva (FEITA em 24/nov/2026; ver o Status)
 Em itens descartáveis: criar caso, vincular a um requisito e a um work item de teste, atualizar título, excluir; reler cada passo.
 
 ## Gates

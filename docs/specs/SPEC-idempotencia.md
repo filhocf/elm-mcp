@@ -1,6 +1,6 @@
 # SPEC — Idempotência e checagem de duplicata na criação
 
-**Status:** IMPLEMENTADA (G4, aguarda G5 e aceitação viva) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W4 · **Depende de:** `SPEC-rm-consulta`
+**Status:** IMPLEMENTADA (G4); aceitação viva PARCIAL em 24/nov/2026: `if_exists` `error` e `return` confirmados em `create_workitem` (IB), `create_requirement` e `create_qm_resource`; o caminho de 400/409 e o de timeout só têm mocks · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Onda:** W4 · **Depende de:** `SPEC-rm-consulta`
 
 ## Meta
 Republicar a mesma especificação (ou repetir uma criação após erro de rede) não pode gerar artefato duplicado.

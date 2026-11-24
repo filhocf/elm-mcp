@@ -81,9 +81,9 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
      it with `created: false`, `"create"` creates anyway. After a 400/409 the check runs again before
      the single resend, and a timeout never resends the POST.
    - **Team area.** Take the `uri` of a team from `list_teams(project)` and pass
-     `custom_fields={"rtc_cm:teamArea": {"rdf:resource": uri}}`. Writing `teamArea` this way has **not**
-     been validated against a live server yet (try it on a disposable item first), and `set_field` is not
-     suitable for it (it would send a plain string).
+     `custom_fields={"rtc_cm:teamArea": {"rdf:resource": uri}}`. Writing `teamArea` this way was
+     validated live on 24/nov/2026 (the stored value equals the `uri` from `list_teams`); `set_field` was not tried
+     live for it (by reading the code it would send a plain string, so prefer `custom_fields`).
    Pass `parent_id` to create it already linked under a parent.
 7. **Child item.** `add_child_workitem(parent_id, title, type="task", description=None,
    owner=None, project=...)` creates a work item linked as a child of `parent_id` — use this
