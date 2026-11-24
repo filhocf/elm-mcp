@@ -99,7 +99,7 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
   `duplicate_of` or `resolves`; an item cannot be linked to itself. Confirmed by re-reading.
 - `set_field(id, field, value)`: `field` is `prefix:name` (or a shape property name); it must be in
   the item's shape and not read-only (otherwise use `list_fields`); the value is converted to the
-  field's range (integer, boolean, decimal) and an enumerated field takes the literal title or id.
+  field's range (integer, boolean, decimal) and an enumerated field takes the label (as `list_fields` shows it; an ambiguous label is refused listing the ids), the id or the URI.
 - `list_workflow(project, type, refresh=False)`: states (`id`, `title`, `group`) and action ids for
   `transition_workitem`.
 
