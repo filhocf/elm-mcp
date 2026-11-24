@@ -85,6 +85,32 @@ update_requirement(
 > `list_types(domain="rm", project=...)` and pass its `shape_uri`. `content` is HTML and is
 > sanitized to XHTML before being stored in `jazz_rm:primaryText`.
 
+### Content format and large bodies
+
+`content_format` (`create_requirement`, `update_requirement`) selects how `content` is read:
+`"html"` (default; sanitized, `script`/`style`/`iframe`/`object`/`embed` and characters above U+FFFF removed),
+`"xhtml"` (only validated and wrapped; refused if not well-formed) or `"markdown"` (headings, paragraphs,
+bold/italic/inline code, fenced code, lists with one nesting level, blockquote, `---`, pipe tables, links and
+images by `http`/`https`/`mailto` URL; raw HTML is escaped). Any other value is refused before any request.
+The stored text always has exactly one `<div xmlns="http://www.w3.org/1999/xhtml">` root, also when the content
+already comes with it.
+
+```python
+create_requirement(
+    project="MY RM PROJECT",
+    title="HF-002 Export",
+    type="...",
+    content="## Rule\n\n- item one\n- item two",
+    content_format="markdown",
+)
+```
+
+`ELM_RM_CREATE_FALLBACK_BYTES` (default 4096, read per call): if the server answers the creation POST with an
+explicit 403 and the content is larger than this many bytes, the requirement is created without text and the
+content is applied by PUT with `If-Match`, confirmed by a re-read. The result then carries
+`content_applied`; if the PUT fails it is `false`, the requirement exists (`uri`) and a `warning` says so;
+nothing is deleted. A POST is never resent after a timeout.
+
 ## Creating Work Items
 
 ```python

@@ -882,10 +882,13 @@ async def create_requirement(
     folder: str | None = None,
     type: str | None = None,
     if_exists: str = "error",
+    content_format: str = "html",
 ) -> dict:
     """Create a requirement in a DOORS Next (RM) project via OSLC.
 
-    The HTML content is sanitized to XHTML and stored in jazz_rm:primaryText.
+    The content is converted per content_format to XHTML (one root div, active content removed) and stored in
+    jazz_rm:primaryText. If the server refuses a large body with 403, the requirement is created empty and the
+    content is applied by PUT (the result then has content_applied; false means created WITHOUT the content).
     Before creating, a requirement of the same type, title and folder is looked up in the project's configuration
     (see if_exists). The server compares the title EXACTLY (case and inner spaces count; only leading/trailing
     spaces of the request are dropped). Without `folder`, a requirement in any folder counts as a duplicate
@@ -896,7 +899,7 @@ async def create_requirement(
     Args:
         project: RM project name (e.g., "MY RM PROJECT")
         title: Requirement title (required)
-        content: HTML content (sanitized to XHTML for primaryText)
+        content: Requirement content, in the format given by content_format
         folder: Folder URI to link the requirement to (nav:parent), optional
         type: REQUIRED. Requirement type: the shape URI or the type title, both as shown by
             list_types("rm", project). Without it, or with an unknown title, the call is refused
@@ -905,10 +908,14 @@ async def create_requirement(
             identifier; "return" returns it with created=false and writes nothing; "create" creates anyway. If the
             duplicate check itself fails the creation is refused (except "create"). A timeout after the request was
             sent never resends it: the check runs again.
+        content_format: "html" (default, sanitized to XHTML), "xhtml" (only validated, refused if not well-formed)
+            or "markdown" (headings, lists, tables, code, emphasis, links, images by http/https URL; raw HTML is
+            escaped).
     """
     oslc.check_if_exists(if_exists)
-    xhtml = oslc.sanitize_html_to_xhtml(content)
-    return await oslc.create_requirement(project, title, xhtml, folder=folder, shape=type, if_exists=if_exists)
+    return await oslc.create_requirement(
+        project, title, content, folder=folder, shape=type, if_exists=if_exists, content_format=content_format
+    )
 
 
 @tool
@@ -916,15 +923,17 @@ async def update_requirement(
     uri: str,
     title: str | None = None,
     content: str | None = None,
+    content_format: str = "html",
 ) -> dict:
     """Update a requirement in DOORS Next (RM) via OSLC PUT with ETag.
 
     Args:
         uri: OSLC URI of the requirement to update
         title: New title (optional)
-        content: New HTML content, sanitized to XHTML (optional)
+        content: New content, in the format given by content_format (optional)
+        content_format: "html" (default, sanitized to XHTML), "xhtml" (only validated) or "markdown"
     """
-    return await oslc.update_requirement(uri, title=title, xhtml=content)
+    return await oslc.update_requirement(uri, title=title, xhtml=content, content_format=content_format)
 
 
 @tool

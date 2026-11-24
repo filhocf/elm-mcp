@@ -4,6 +4,7 @@ import html as _html
 import io
 import logging
 import math
+import os
 import re as _re
 from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
@@ -14,6 +15,7 @@ import httpx
 from . import cache, profile
 from .auth import _authenticate, get_client, session_state
 from .config import settings
+from .markdown_xhtml import markdown_to_xhtml
 
 logger = logging.getLogger(__name__)
 
@@ -1114,6 +1116,14 @@ def sanitize_html_to_xhtml(html: str) -> str:
     if not html:
         return ""
     content = html
+    # Active content goes away with everything inside it
+    content = _re.sub(
+        r"<(script|style|iframe|object)\b[^>]*?(?:/>|>.*?(?:</\1\s*>|\Z))",
+        "",
+        content,
+        flags=_re.IGNORECASE | _re.DOTALL,
+    )
+    content = _re.sub(r"<embed\b[^>]*>(?:\s*</embed\s*>)?", "", content, flags=_re.IGNORECASE)
     # Remove html/head/body/meta wrappers
     content = _re.sub(r"<html[^>]*>", "", content, flags=_re.IGNORECASE)
     content = _re.sub(r"</html>", "", content, flags=_re.IGNORECASE)
@@ -1133,7 +1143,49 @@ def sanitize_html_to_xhtml(html: str) -> str:
     content = _re.sub(r"[\u2600-\u27BF]", "", content)
     content = _re.sub(r"[\U0001FA00-\U0001FA6F]", "", content)
     content = _re.sub(r"[\U0001F300-\U0001F5FF]", "", content)
-    return content.strip()
+    content = _ASTRAL.sub("", content)
+    return _unwrap_root_div(content.strip())
+
+
+_ASTRAL = _re.compile("[\U00010000-\U0010ffff]")
+_ROOT_DIV = _re.compile(rf'^<div\s+xmlns="{_re.escape(_XHTML_NS)}"\s*>(.*)</div>$', _re.DOTALL)
+_DIV_TOKEN = _re.compile(r"<(/?)div\b[^>]*?(/?)>", _re.IGNORECASE)
+
+
+def _unwrap_root_div(content: str) -> str:
+    """Remove the XHTML root ``<div xmlns=...>`` (repeatedly) when it wraps the whole content, so the caller wraps once."""
+    while (m := _ROOT_DIV.match(content)) is not None:
+        inner = m.group(1)
+        depth = 0
+        for token in _DIV_TOKEN.finditer(inner):
+            if token.group(2):  # self-closing <div/>
+                continue
+            depth += -1 if token.group(1) else 1
+            if depth < 0:  # the first div closes before the end: it is not the root of everything
+                return content
+        content = inner.strip()
+    return content
+
+
+CONTENT_FORMATS = ("html", "xhtml", "markdown")
+
+
+def prepare_content(content: str, content_format: str = "html") -> str:
+    """Normalize requirement content to well-formed XHTML WITHOUT the root div (the RDF builder wraps once).
+
+    ``html`` is sanitized, ``xhtml`` is only validated (and unwrapped), ``markdown`` is converted. Raises ValueError
+    for an unknown format or content that is not well-formed; callers run it before any request.
+    """
+    if content_format not in CONTENT_FORMATS:
+        raise ValueError(f"Invalid content_format '{content_format}'. Must be one of: {', '.join(CONTENT_FORMATS)}.")
+    if content_format == "html":
+        clean = sanitize_html_to_xhtml(content)
+    elif content_format == "markdown":
+        clean = _unwrap_root_div(_ASTRAL.sub("", markdown_to_xhtml(content or "")).strip())
+    else:
+        clean = _unwrap_root_div(_ASTRAL.sub("", content or "").strip())
+    _assert_xhtml_wellformed(clean)
+    return clean
 
 
 async def _find_requirement_factory(project_url: str) -> str:
@@ -1358,12 +1410,14 @@ async def create_requirement(
     folder: str | None = None,
     shape: str | None = None,
     if_exists: str = "error",
+    content_format: str = "html",
 ) -> dict:
     """Create an RM requirement via OSLC POST to the requirementFactory.
 
     Resolves the project, requires and resolves ``shape`` (URI or type title, D7),
-    discovers the factory, sanitizes nothing here (the caller passes already-sanitized
-    XHTML), builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
+    discovers the factory, normalizes ``xhtml`` per ``content_format`` (html | xhtml | markdown, see
+    prepare_content; validated before any request, idempotent for content already wrapped in the root div),
+    builds the RDF/XML, and POSTs it (Accept/Content-Type application/rdf+xml).
     Accepts 200 or 201. Re-authenticates once on an expired session (see _needs_reauth).
     Before the POST, a requirement with the same title (the server compares it exactly; case and inner spaces
     count), type and folder is looked up (see create_idempotent, ``if_exists``); the result carries ``created``.
@@ -1372,22 +1426,66 @@ async def create_requirement(
     Returns {"uri": ..., "identifier": ..., "created": ...}, the identifier re-read from the server (D8). If the
     re-read fails after the POST (the requirement exists), it never raises: it returns the POST-body identifier
     (or None) and a short ``warning`` key, and logs a warning.
-    Raises ValueError if the project does not exist or the type is missing/unknown.
+    Only after an explicit 403 of the POST, and with content larger than ELM_RM_CREATE_FALLBACK_BYTES (default
+    4096), the requirement is created without text and the content goes by PUT (see _create_in_two_steps); the
+    result then carries ``content_applied``. Raises ValueError if the project does not exist or the type is
+    missing/unknown.
     """
     check_if_exists(if_exists)
+    xhtml = prepare_content(xhtml, content_format)
     project_url = await _resolve_project_url("rm", project)
     shape = await _resolve_requirement_shape(project, shape)
     factory_url = await _find_requirement_factory(project_url)
-    _assert_xhtml_wellformed(xhtml)
     rdf_body = _requirement_to_rdfxml(title, xhtml, shape=shape, folder=folder)
 
     async def find() -> list[dict]:
         return await _find_rm_duplicates(project, title, shape, folder)
 
     async def create() -> dict:
-        return await _post_requirement(factory_url, rdf_body)
+        try:
+            return await _post_requirement(factory_url, rdf_body)
+        except WriteRejected as exc:
+            if exc.status_code != 403 or len(xhtml.encode("utf-8")) <= _create_fallback_bytes():
+                raise
+        # Explicit 403: nothing was created. One more POST, without the text, then the content by PUT.
+        minimal = _requirement_to_rdfxml(title, "", shape=shape, folder=folder)
+        return await _apply_content_after_create(await _post_requirement(factory_url, minimal), xhtml)
 
     return await create_idempotent(if_exists, find, create, "requirement")
+
+
+def _create_fallback_bytes() -> int:
+    """ELM_RM_CREATE_FALLBACK_BYTES (default 4096), read per call; an invalid value falls back to the default."""
+    try:
+        return int(os.environ.get("ELM_RM_CREATE_FALLBACK_BYTES", "").strip())
+    except ValueError:
+        return 4096
+
+
+async def _apply_content_after_create(created: dict, xhtml: str) -> dict:
+    """Second step of the 2-step creation: PUT the full content (fresh ETag, If-Match) and re-read to confirm.
+
+    A failure here never deletes or re-POSTs: the requirement exists, so the result says so (``uri``) with
+    ``content_applied`` False and a ``warning``.
+    """
+    uri = created.get("uri")
+    try:
+        if not uri:
+            raise ValueError("the server returned no Location for the new requirement")
+        updated = await update_requirement(uri, xhtml=xhtml, content_format="xhtml")
+    except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+        logger.warning("create_requirement: created %s but applying the content failed (%s)", uri, exc)
+        return {
+            **created,
+            "content_applied": False,
+            "warning": f"The requirement was created ({uri}) but its content was not applied: {exc}. Nothing was "
+            "deleted and the creation was not repeated; apply the content with update_requirement.",
+        }
+    result = {**created, "content_applied": True}
+    result["identifier"] = updated.get("identifier") or created.get("identifier")
+    if updated.get("warning"):
+        result["warning"] = updated["warning"]
+    return result
 
 
 async def _post_requirement(factory_url: str, rdf_body: str) -> dict:
@@ -1472,14 +1570,18 @@ async def delete_requirement(uri: str) -> dict:
     raise ValueError(f"Could not confirm the deletion of {uri}")
 
 
-async def update_requirement(uri: str, title: str | None = None, xhtml: str | None = None) -> dict:
+async def update_requirement(
+    uri: str, title: str | None = None, xhtml: str | None = None, content_format: str = "html"
+) -> dict:
     """Update an RM requirement via OSLC PUT with If-Match (ETag).
 
     GETs the resource as rdf+xml for its ETag, edits the XML as a string
     preserving parseType="Literal" (mirrors publicar_elm.atualizar_requisito),
     then PUTs with If-Match. Accepts 200/204. On 412 raises ValueError signalling
-    an ETag conflict (the @tool boundary converts it to a legible ToolError).
+    an ETag conflict (the @tool boundary converts it to a legible ToolError). ``xhtml`` is normalized per
+    ``content_format`` (html | xhtml | markdown) BEFORE any request; a root div already in it is not doubled.
     """
+    clean = prepare_content(xhtml, content_format) if xhtml is not None else None
     client = await get_client()
     get_resp = await fetch(
         client,
@@ -1492,8 +1594,6 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
     if not etag:
         raise ValueError(f"Server did not return an ETag for resource '{uri}'. Cannot safely update.")
     xml_content = get_resp.text
-    if xhtml is not None:
-        _assert_xhtml_wellformed(sanitize_html_to_xhtml(xhtml))
 
     # Edit ONLY inside the target resource's <rdf:Description> block, not the
     # first/any match in the whole document (a GET may return several Descriptions
@@ -1521,8 +1621,7 @@ async def update_requirement(uri: str, title: str | None = None, xhtml: str | No
             flags=_re.DOTALL,
         )
 
-    if xhtml is not None:
-        clean = sanitize_html_to_xhtml(xhtml)
+    if clean is not None:
         primary_content = f'<div xmlns="http://www.w3.org/1999/xhtml">{clean}</div>'
         if "jazz_rm:primaryText" in body:
             body = _re.sub(

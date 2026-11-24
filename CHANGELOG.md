@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- `create_requirement` and `update_requirement` take `content_format` (`html` default, `xhtml`, `markdown`; another value is refused before any request). Markdown is converted by a built-in converter (`markdown_xhtml.py`, no new dependency); the stored text has exactly one root `div` even when the content already carries it; `script`, `style`, `iframe`, `object`, `embed` and characters above U+FFFF are removed from HTML.
+- `create_requirement`: after an explicit 403 on the POST with content larger than `ELM_RM_CREATE_FALLBACK_BYTES` (default 4096), the requirement is created without text and the content is applied by PUT with `If-Match`, confirmed by a re-read; the result carries `content_applied` (`false` plus a `warning` when the PUT fails, with nothing deleted).
+
 ETM (QM) write, scope by evidence (SPEC-qm-write, wave W6). Live acceptance of the writes is pending (writing to the reference ALM is suspended); everything is verified against mocks only:
 
 - `create_qm_resource(project, type, title, description=None, if_exists="error")`: creates a `TestCase`, `TestPlan`, `TestSuite` or `TestScript` by POSTing RDF/XML with only `dcterms:title` (+ `dcterms:description`) to the creation factory found by `oslc:resourceType` (local name, `oslc_qm` and `rqm` namespaces). The title is escaped and stripped of control characters. `uri` and `short_id` are read back from the `Location`. Duplicate check by normalized title among resources of the same type (`if_exists` as in `create_requirement`); the POST is never resent after a timeout. `TestExecutionRecord`, `TestResult`, native script steps and other types are refused as deferred.
