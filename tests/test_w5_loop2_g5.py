@@ -53,7 +53,7 @@ async def test_snapshot_marks_download_attachment_as_a_write_tool():
     snap = json.loads((Path(__file__).parent / "contract" / "tools.snapshot.json").read_text(encoding="utf-8"))
     by_name = {t["name"]: t for t in snap["tools"]}
     assert by_name["download_attachment"]["read_only"] is False
-    assert sum(t["read_only"] for t in snap["tools"]) == 21
+    assert sum(t["read_only"] for t in snap["tools"]) == 22  # 21 + list_teams
     assert sum(not t["read_only"] for t in snap["tools"]) == 19  # 14 + the 5 QM write tools of W6
 
 

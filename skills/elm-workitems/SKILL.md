@@ -67,6 +67,7 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    `type` is any work item type of the project (id, title or alias from `list_types`; an ambiguous
    one is refused listing the ids). Category and iteration are auto-discovered when
    omitted; pass `filed_against` / `custom_fields` explicitly for project-specific values.
+   To set the team area, take `uri` from `list_teams(project)` and pass `custom_fields={"rtc_cm:teamArea": {"rdf:resource": uri}}`.
    Pass `parent_id` to create it already linked under a parent.
 7. **Child item.** `add_child_workitem(parent_id, title, type="task", description=None,
    owner=None, project=...)` creates a work item linked as a child of `parent_id` — use this

@@ -1011,6 +1011,23 @@ async def list_folders(project: str) -> list[dict]:
     return await oslc.list_folders(project)
 
 
+@read_tool
+async def list_teams(project: str, include_archived: bool = False, refresh: bool = False) -> dict:
+    """List the team areas (times) of a CCM (RTC) project area.
+
+    Args:
+        project: Project area name (as shown by list_projects)
+        include_archived: true also returns archived teams (default false)
+        refresh: true ignores the discovery cache (ELM_CACHE_TTL, default 300 s) and reloads it
+
+    Returns {"items": [{"name", "id", "uri", "process_uri", "archived"}], "total"}, sorted by name.
+    "uri" is the rtc_cm:teamArea value, meant for create_workitem(custom_fields=...) and
+    update_workitem(custom_fields=...) as {"rtc_cm:teamArea": {"rdf:resource": uri}}. Writing the team this way
+    is NOT validated live yet (pending live acceptance).
+    """
+    return await oslc.list_teams(project, include_archived, refresh)
+
+
 def main():
     """Entry point for the MCP server."""
     mcp.run(transport="stdio")
