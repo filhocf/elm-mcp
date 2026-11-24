@@ -7,6 +7,7 @@ import weakref
 import httpx
 
 from .config import settings
+from .tls import _tls_verify
 
 # Suppress httpx info logs (interfere with MCP stdio)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -51,8 +52,9 @@ async def get_client() -> httpx.AsyncClient:
     """Get authenticated httpx client, re-authenticating if needed."""
     global _client
     if _client is None:
+        verify = _tls_verify()
         client = httpx.AsyncClient(
-            verify=False,
+            verify=verify,
             timeout=60.0,
             follow_redirects=True,
             event_hooks={"response": [_refuse_foreign_redirect]},
@@ -68,6 +70,8 @@ async def get_client() -> httpx.AsyncClient:
 
 async def _authenticate(client: httpx.AsyncClient) -> None:
     """Perform Jazz form-based authentication."""
+    if settings.credentials_error:
+        raise RuntimeError(f"[credencial] {settings.credentials_error}")
     auth_url = f"{settings.elm_url}/jts/j_security_check"
     resp = await client.post(
         auth_url,

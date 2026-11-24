@@ -21,6 +21,7 @@ IBM ELM exposes three OSLC domains, each a separate Jazz application:
 |--------|----------------|
 | `cli.py`     | Entry point: `login` (credential setup) and `serve` (MCP over stdio). |
 | `config.py`  | Settings via pydantic-settings: `ELM_URL`/`ELM_USER`/`ELM_PASSWORD` env, or `~/.elm_creds.json`. |
+| `tls.py`     | `ELM_CA_BUNDLE` / `ELM_VERIFY_TLS` to the `verify` setting of httpx; imports nothing from `config`. |
 | `auth.py`    | Jazz form-based auth; a singleton async `httpx` client holding the session cookies. |
 | `oslc.py`    | OSLC service discovery and query/CRUD. Pure ELM/OSLC — **no MCP SDK dependency**. |
 | `server.py`  | `MCPServer` (mcp 2.x) and the tools. The `@tool` decorator translates domain errors into `ToolError` at the boundary. |
@@ -67,7 +68,7 @@ capabilities (RM write, discovery tools, OSLC links, QM write, reporting) are tr
 
 ## Constraints
 
-- SSL verification is currently disabled for internal certificates (configurable path on the roadmap).
+- TLS verification is on by default; internal CAs via `ELM_CA_BUNDLE`, opt-out via `ELM_VERIFY_TLS=false`.
 - Single-server configuration via environment or credentials file.
 - Creating iterations/sprints is not possible via OSLC CCM (manual in EWM); the MCP only links
   (`plannedFor`).
