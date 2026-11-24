@@ -1,19 +1,18 @@
-"""RED tests for issue #77: ``list_fields`` returns ``title=None`` for the values of enumerated fields.
+"""Tests for issue #77: ``list_fields`` fills the titles of the values of enumerated fields.
 
 The real server lists only references in the ``allowedValues`` document
 (``<oslc:allowedValue rdf:resource=".../enumerations/{pa}/{enum}/{enum}.literal.l38"/>``); the labels live in the
 enumeration document ``GET {origin}/ccm/oslc/enumerations/{pa}/{enum}`` (one ``rdf:Description`` per literal,
-label in ``rdfs:label``). Target behavior pinned here:
+label in ``rdfs:label``). Behavior pinned here:
 
   * a value without a title whose URI is same-origin and has ``/oslc/enumerations/`` in its path makes the code
     read the enumeration (the URL is BUILT by the code: the value URI minus its last segment) once, through the
     discovery cache, and fill the titles (``rdfs:label``, ``dcterms:title`` also accepted);
+  * a value whose path segments are not plain names (``..``, ``%``), or that carries userinfo, is never fetched;
+    an enumeration larger than 5 MB is not used;
   * any failure of that read leaves the titles ``None`` and never fails ``list_fields``;
-  * ``set_field`` matches the label; duplicated labels are ambiguous;
+  * ``set_field`` matches the label; duplicated labels, and an id equal to another literal's label, are ambiguous;
   * workflow states and the profile draft are unchanged (no enumeration read).
-
-Tests that only guard unchanged behavior (group 8, the id regression of group 7) pass today on purpose; every
-other test fails today because the enumeration is never read.
 
 Mocks: a private respx router per test (an unrouted request raises). Tenant-neutral data only.
 """
@@ -652,3 +651,114 @@ def test_profile_draft_is_unchanged_it_reads_no_enumeration(monkeypatch, capsys)
         {"value_uri": lit(38), "title": None},
         {"value_uri": lit(33), "title": None},
     ]
+
+
+# ======================================================================
+# 10. Hardening: path segments, userinfo, size cap
+# ======================================================================
+_ENUM_ROOT = f"{BASE}/ccm/oslc/enumerations"
+_BAD_SEGMENTS = [
+    pytest.param(f"{_ENUM_ROOT}/../x/{ENUM}.literal.l1", id="pa-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/../{ENUM}.literal.l1", id="enum-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/./{ENUM}/{ENUM}.literal.l1", id="pa-dot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/./{ENUM}.literal.l1", id="enum-dot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/%2e%2e/{ENUM}.literal.l1", id="enum-encoded-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/%2E%2E/{ENUM}/{ENUM}.literal.l1", id="pa-encoded-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/a%2fb/{ENUM}.literal.l1", id="enum-encoded-slash"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/{ENUM}/%2e%2e", id="literal-encoded-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/{ENUM}/..", id="literal-dotdot"),
+    pytest.param(f"{_ENUM_ROOT}/{PA}/{ENUM}/a%20b", id="literal-percent"),
+]
+
+
+@pytest.mark.parametrize("value", _BAD_SEGMENTS)
+async def test_a_value_with_a_non_plain_path_segment_is_never_fetched(env, value):
+    env.add_field("categoria", [value])
+    env.router.get(url__regex=r".*/enumerations/.*").mock(return_value=httpx.Response(200, text=enum_doc(LABELS)))
+    result = await _fields()
+    assert result["categoria"]["allowed_values"] == [{"value_uri": value, "title": None}]
+    asked = [str(c.request.url) for c in env.router.calls]
+    assert not [u for u in asked if "/enumerations/" in u and "/shapes/" not in u]
+
+
+async def test_a_plain_segment_with_dots_dashes_and_underscores_is_still_resolved(env):
+    env.add_field("categoria", [lit(38, enum="a-b_c.d")])
+    env.serve_enum(enum_url("a-b_c.d"), enum_doc([(38, "Ok")], enum="a-b_c.d"))
+    assert _titles((await _fields())["categoria"]) == {lit(38, enum="a-b_c.d"): "Ok"}
+
+
+async def test_a_value_with_userinfo_is_never_fetched_nor_logged(env, caplog):
+    value = f"https://user:s3cret@elm.example.com/ccm/oslc/enumerations/{PA}/{ENUM}/{ENUM}.literal.l38"
+    env.add_field("categoria", [value])
+    env.serve_enum(enum_url(), enum_doc(LABELS))
+    result = await _fields()
+    assert result["categoria"]["allowed_values"] == [{"value_uri": value, "title": None}]
+    assert env.enum_calls == []
+    assert "s3cret" not in caplog.text
+
+
+async def test_the_enumeration_url_never_carries_userinfo():
+    from elm_mcp import oslc
+
+    assert oslc._enumeration_of(lit(38)) == (PA, enum_url())
+    assert oslc._enumeration_of(lit(38).replace("https://", "https://u:p@")) is None
+    assert oslc._enumeration_of(lit(38).replace("https://", "https://u@")) is None
+
+
+async def test_an_enumeration_over_5_mb_leaves_the_titles_none_with_a_short_warning(env, caplog):
+    env.add_field("categoria", [lit(38)])
+    env.serve_enum(enum_url(), enum_doc(LABELS) + " " * (5 * 1024 * 1024 + 1))
+    result = await _fields()
+    assert result["categoria"]["allowed_values"] == [{"value_uri": lit(38), "title": None}]
+    assert "titles stay empty" in caplog.text
+    assert len(caplog.text) < 600
+
+
+async def test_an_enumeration_just_under_the_cap_is_used(env):
+    env.add_field("categoria", [lit(38)])
+    env.serve_enum(enum_url(), enum_doc(LABELS) + " " * (4 * 1024 * 1024))
+    assert _titles((await _fields())["categoria"]) == {lit(38): "Demanda / Projeto"}
+
+
+# ======================================================================
+# 11. id x label ambiguity in set_field
+# ======================================================================
+def _id_label_env(env: Env, pairs: list[tuple[str, str]]) -> FakeItem:
+    """Literals at ``{enum_url}/{id}`` with the given labels (ids may be plain numbers)."""
+    env.add_field("categoria", [f"{enum_url()}/{i}" for i, _ in pairs])
+    descs = "".join(
+        f'<rdf:Description rdf:about="{enum_url()}/{i}"><rdfs:label>{t}</rdfs:label></rdf:Description>'
+        for i, t in pairs
+    )
+    env.serve_enum(enum_url(), f"<rdf:RDF {RDF_NS}>{descs}</rdf:RDF>")
+    return FakeItem(env.router, "100")
+
+
+async def test_set_field_id_equal_to_another_literals_label_is_ambiguous(env):
+    item = _id_label_env(env, [("a", "5"), ("5", "Cinco")])
+    with pytest.raises(ToolError) as exc:
+        await server.set_field("100", FIELD, "5")
+    message = str(exc.value)
+    assert "ambig" in message.lower()
+    assert f"{enum_url()}/a" in message and f"{enum_url()}/5" in message
+    assert "URI" in message
+    assert item.puts == []
+
+
+@pytest.mark.parametrize("target", ["a", "5"])
+async def test_set_field_id_equal_to_a_label_is_disambiguated_by_the_full_uri(env, target):
+    item = _id_label_env(env, [("a", "5"), ("5", "Cinco")])
+    await server.set_field("100", FIELD, f"{enum_url()}/{target}")
+    assert item.put_body()[FIELD] == {"rdf:resource": f"{enum_url()}/{target}"}
+
+
+async def test_set_field_id_without_a_label_conflict_still_resolves(env):
+    item = _id_label_env(env, [("a", "Alfa"), ("5", "Cinco")])
+    await server.set_field("100", FIELD, "5")
+    assert item.put_body()[FIELD] == {"rdf:resource": f"{enum_url()}/5"}
+
+
+async def test_set_field_id_matching_its_own_label_is_not_ambiguous(env):
+    item = _id_label_env(env, [("5", "5"), ("a", "Alfa")])
+    await server.set_field("100", FIELD, "5")
+    assert item.put_body()[FIELD] == {"rdf:resource": f"{enum_url()}/5"}

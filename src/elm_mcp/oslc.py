@@ -1877,8 +1877,11 @@ def _shape_title(xml_text: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
-async def _get_xml_text(url: str) -> str:
-    """GET a URL as rdf+xml/xml text (shared by the discovery helpers)."""
+async def _get_xml_text(url: str, max_bytes: int | None = None) -> str:
+    """GET a URL as rdf+xml/xml text (shared by the discovery helpers).
+
+    ``max_bytes`` refuses (ValueError) a body larger than that; the body is already in memory when checked.
+    """
     client = await get_client()
     resp = await fetch(
         client,
@@ -1887,6 +1890,8 @@ async def _get_xml_text(url: str) -> str:
         "discovery",
         headers={"Accept": "application/rdf+xml, application/xml", "OSLC-Core-Version": "2.0"},
     )
+    if max_bytes is not None and len(resp.content) > max_bytes:
+        raise ValueError(f"response larger than {max_bytes} bytes")
     return resp.text
 
 
@@ -2066,6 +2071,8 @@ async def list_shape_properties(shape_uri: str) -> list[dict]:
 
 
 _ENUMERATIONS_SEGMENT = "/oslc/enumerations/"
+_ENUMERATION_MAX_BYTES = 5 * 1024 * 1024
+_PLAIN_SEGMENT_RE = _re.compile(r"^[A-Za-z0-9_.\-]+$")
 _LABEL_TAGS = ("{http://www.w3.org/2000/01/rdf-schema#}label", f"{{{NS['dcterms']}}}title")
 
 
@@ -2079,16 +2086,22 @@ def _enumeration_of(value_uri: str) -> tuple[str, str] | None:
     except ValueError:
         return None
     parsed = urlparse(value_uri)
+    if parsed.username is not None or parsed.password is not None or not parsed.hostname:
+        return None  # never build a URL (or a cache key) from credentials
     head, sep, tail = parsed.path.partition(_ENUMERATIONS_SEGMENT)
     parts = tail.split("/")
-    if not sep or len(parts) != 3 or not all(parts):  # {pa}/{enum}/{literal}
+    if not sep or len(parts) != 3:  # {pa}/{enum}/{literal}
         return None
-    return parts[0], f"{parsed.scheme}://{parsed.netloc}{head}{sep}{parts[0]}/{parts[1]}"
+    if not all(_PLAIN_SEGMENT_RE.match(p) and p not in (".", "..") for p in parts):
+        return None  # '..', '.', '%2e%2e', '%2f'...: the segment would leave the enumerations path
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    netloc = f"{host}:{parsed.port}" if parsed.port else host
+    return parts[0], f"{parsed.scheme}://{netloc}{head}{sep}{parts[0]}/{parts[1]}"
 
 
 async def _load_enumeration_labels(url: str) -> dict[str, str]:
     """GET an enumeration document and map each rdf:Description's rdf:about to its label (DTD/entities refused)."""
-    text = await _get_xml_text(url)
+    text = await _get_xml_text(url, max_bytes=_ENUMERATION_MAX_BYTES)
     if "<!DOCTYPE" in text or "<!ENTITY" in text:
         raise ValueError("invalid RDF/XML response: DTD/entity declarations are not accepted")
     try:
@@ -2765,15 +2778,22 @@ def _compact(uri: str, prefixes: dict) -> str | None:
 def _match_literal(value: str, allowed: list[dict]) -> dict | None:
     """The allowed value for a URI, id or label; None when nothing matches, ValueError when a label is ambiguous."""
     wanted = value.strip()
+    folded = wanted.casefold()
+    by_label = [a for a in allowed if a["title"] is not None and a["title"].strip().casefold() == folded]
     for a in allowed:
         if a["value_uri"] == wanted or _last_segment(a["value_uri"]) == wanted:
+            rivals = [b for b in by_label if b is not a]
+            if a["value_uri"] != wanted and rivals:  # the full URI always disambiguates
+                other = rivals[0]
+                raise ValueError(
+                    f"Value '{value}' is ambiguous: it is the id of {a['value_uri']} and the label of "
+                    f"{other['value_uri']}. Pass the full URI of the one you want."
+                )
             return a
-    folded = wanted.casefold()
-    found = [a for a in allowed if a["title"] is not None and a["title"].strip().casefold() == folded]
-    if len(found) > 1:
-        ids = [_last_segment(a["value_uri"]) for a in found]
-        raise ValueError(f"Label '{value}' is ambiguous ({len(found)} values share it): use one of the ids {ids}.")
-    return found[0] if found else None
+    if len(by_label) > 1:
+        ids = [_last_segment(a["value_uri"]) for a in by_label]
+        raise ValueError(f"Label '{value}' is ambiguous ({len(by_label)} values share it): use one of the ids {ids}.")
+    return by_label[0] if by_label else None
 
 
 _FIELD_QNAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*:[\w.-]+$")
