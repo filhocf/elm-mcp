@@ -1,13 +1,14 @@
 # SPEC — QM write (escrita no ETM): casos, planos, suítes, scripts, vínculos
 
-**Status:** G4 (GREEN) implementado e verificado só por mocks (evidência de 16/nov e de leitura viva 23/nov); G5 e aceitação viva de ESCRITA pendentes (escrita suspensa) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-oslc-links`
+**Status:** G4 (GREEN) implementado e verificado só por mocks (evidência de 16/nov e de leitura viva 23/nov); G5 feito; aceitação viva de ESCRITA FEITA em 24/nov/2026 (criação dos 4 tipos pela tool, edição de TestCase/TestPlan/TestScript/TestSuite, vínculos `validatesRequirement` e `testsChangeRequest` e remoção, cobertura, exclusão; tudo em itens descartáveis do projeto de referência, todos excluídos) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5 · **Depende de:** `SPEC-qm-leitura`, `SPEC-oslc-links`
 **Classe:** entregável de produto — fecha o ciclo RM→QM→CM
 
 ## Meta
 Escrita no domínio QM (ETM) via OSLC QM 2.0: criar e manter os recursos de teste e vinculá-los a requisitos e work items.
 
 ## Evidência (servidor de referência, ETM 7.0.1 SR1)
-- Criar TestCase (16/nov, escrita real): POST RDF/XML na fábrica do tipo, só com `dcterms:title`, responde 201 com `Location` (o servidor preenche estado inicial e id curto). A lista de "obrigatórios" do shape inclui propriedades de sub-shapes e não reflete o mínimo real.
+- Criar TestCase (16/nov, escrita real): POST RDF/XML na fábrica do tipo, com UM nó tipado e só `dcterms:title`, responde 201 com `Location` (o servidor preenche estado inicial e id curto). A lista de "obrigatórios" do shape inclui propriedades de sub-shapes e não reflete o mínimo real.
+- Corpo da criação (issue #78, vivo 24/nov): o POST DEVE ser UM nó tipado com `rdf:about=""`: `oslc_qm:TestCase`, `oslc_qm:TestPlan`, `oslc_qm:TestScript` e `rqm_qm:TestSuite` (namespace `http://jazz.net/ns/qm/rqm#`; `oslc_qm:TestSuite` dá 400). Um `rdf:Description` sem tipo também dá 400. O probe de 16/nov usava nó tipado; a tool enviava `rdf:Description` e o fake aceitava qualquer corpo, por isso o defeito escapou dos testes. O atributo `rdf:about=""` é enviado sempre (probe e tool); NÃO foi isolado se o ETM real o exige.
 - Atualizar (16/nov): PUT do RDF completo com `If-Match`: 200; ETag obsoleto: 412.
 - Excluir (16/nov): DELETE: 200; leitura posterior: 404.
 - Leitura viva (23/nov): `services.xml` publica `oslc:CreationFactory` para os mesmos tipos das consultas (resourceType em dois namespaces, `oslc_qm` e `rqm`), com a URL de criação = a base do recurso. Um TestCase individual (RDF/XML) traz `ETag` e os links `oslc_qm:validatesRequirement`, `oslc_qm:testsChangeRequest`, `oslc_qm:usesTestScript`. Fixtures: `tests/fixtures/qm_testcase_one.xml`, `qm_creation_factories.xml`.
@@ -20,6 +21,7 @@ Só o que tem evidência de escrita real entra:
 
 ## Critério de aceite (EARS)
 - QUANDO `create_qm_resource` for chamado com `type` e título, o sistema DEVE descobrir a fábrica de criação pelo `oslc:resourceType` (nome local, nos dois namespaces) do `services.xml`, enviar POST RDF/XML só com `dcterms:title` (e `dcterms:description` quando informada) e retornar `uri` e `short_id` lidos do servidor por releitura.
+- QUANDO `create_qm_resource` montar o corpo, o sistema DEVE enviar UM nó tipado com `rdf:about=""` (`oslc_qm:TestCase`/`TestPlan`/`TestScript`; `rqm_qm:TestSuite`, nunca `oslc_qm:TestSuite`), nunca `rdf:Description`; os filhos continuam sendo só `dcterms:title` e, se informada, `dcterms:description`.
 - SE o tipo for TestExecutionRecord, TestResult ou outro fora da lista suportada, ENTÃO o sistema DEVE recusar com `ToolError` listando os tipos suportados e dizendo que os demais estão adiados.
 - QUANDO um recurso for atualizado, o sistema DEVE reler o recurso, alterar só título/descrição, e enviar PUT do RDF completo com `If-Match`; SE o servidor responder 412, ENTÃO DEVE levantar `ToolError` de conflito (gate `[conflito]`).
 - QUANDO um TestCase for vinculado a um requisito ou work item, o sistema DEVE reler o recurso, acrescentar o link preservando os demais, enviar o PUT completo com `If-Match` e confirmar na releitura (conjunto final == esperado); `unlink_test_case` DEVE remover só aquele alvo.

@@ -68,9 +68,10 @@ ETM answers **only RDF/XML** (JSON is refused with 406). The tools handle that; 
   including results and execution records, so check the URI (`get_qm_resource`) before calling it.
 - **Writes are only title and description.** The ETM may require other data for some types; if the server
   refuses a creation, its message is shown unchanged.
-- **Live acceptance is pending.** The writes are covered by tests against mocks; a real `TestCase` creation
-  was verified on 16 Nov 2026, while plans, suites and scripts follow the same pattern and are still to be
-  confirmed. Prefer a disposable item when trying them on a real server.
+- **Live status.** Creation of the four types (with the typed-body fix of issue #78), editing, links, deletion and
+  coverage were validated against a real ETM on 24 Nov 2026 (disposable items, all deleted). The ETM refuses an untyped
+  creation body, and a TestSuite only accepts the `rqm` namespace; the tool handles both. Prefer a disposable item
+  when trying writes on a real server.
 - **After a write whose confirmation read failed**, the error says the PUT SUCCEEDED and the
   resource WAS changed: re-read before retrying; never resend blindly.
 - A project's ETM query capabilities and the Reportable REST alias can differ from its title; the tools

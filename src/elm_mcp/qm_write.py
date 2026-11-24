@@ -386,17 +386,29 @@ async def _put(client: httpx.AsyncClient, uri: str, body: bytes, etag: str, oper
 # ---------------------------------------------------------------------------------------------
 # create_qm_resource
 # ---------------------------------------------------------------------------------------------
-def _creation_body(title: str, description: str) -> bytes:
-    """RDF/XML with ONE resource whose only properties are ``dcterms:title`` (+ ``dcterms:description``)."""
+# The ETM answers 400 to an untyped <rdf:Description>: the node must be typed (issue #78). TestSuite lives in the
+# rqm namespace; the other types in oslc_qm.
+_CREATION_NODE = {
+    "TestCase": ("oslc_qm", _QM, "TestCase"),
+    "TestPlan": ("oslc_qm", _QM, "TestPlan"),
+    "TestScript": ("oslc_qm", _QM, "TestScript"),
+    "TestSuite": ("rqm_qm", _RQM, "TestSuite"),
+}
+
+
+def _creation_body(type_name: str, title: str, description: str) -> bytes:
+    """RDF/XML with ONE typed anonymous node holding only ``dcterms:title`` (+ ``dcterms:description``)."""
+    prefix, ns, local = _CREATION_NODE[type_name]
+    node = f"{prefix}:{local}"
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<rdf:RDF xmlns:rdf="{_RDF}" xmlns:dcterms="{_DCTERMS}">',
-        " <rdf:Description>",
+        f'<rdf:RDF xmlns:rdf="{_RDF}" xmlns:dcterms="{_DCTERMS}" xmlns:{prefix}="{ns}">',
+        f' <{node} rdf:about="">',
         f"  <dcterms:title>{escape(title)}</dcterms:title>",
     ]
     if description:
         parts.append(f"  <dcterms:description>{escape(description)}</dcterms:description>")
-    parts += [" </rdf:Description>", "</rdf:RDF>", ""]
+    parts += [f" </{node}>", "</rdf:RDF>", ""]
     return "\n".join(parts).encode("utf-8")
 
 
@@ -458,7 +470,7 @@ async def create_resource(
     clean_desc = clean_description(description) if description is not None else ""
     project_url = await oslc._resolve_project_url("qm", project)
     factory_url = await qm.creation_factory(project_url, canonical)
-    body = _creation_body(clean, clean_desc)
+    body = _creation_body(canonical, clean, clean_desc)
     wanted = oslc.normalize_title(clean)
 
     async def find() -> list[dict]:
