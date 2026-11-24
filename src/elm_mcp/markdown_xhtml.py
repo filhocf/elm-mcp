@@ -7,15 +7,17 @@ passes) and only http/https/mailto URLs become links or images, so the output is
 
 import re
 
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
 _SAFE_URL = re.compile(r"^(https?://|mailto:)\S+$", re.IGNORECASE)
-_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE = re.compile(r"^\s*```")
 _HR = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
 _LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
-_TABLE_SEP = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
-_IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]*)\)")
-_LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+_TABLE_SEP_CELL = re.compile(r":?-+:?")
+# URL of a link/image: no whitespace, at most one level of balanced parentheses; the window below bounds the scan.
+_URL = re.compile(r"((?:[^()\s]|\([^()\s]*\))*)\)")
+_MAX_LABEL = 1000
+_MAX_URL = 2000
 _MAX_INLINE_DEPTH = 8
 
 
@@ -24,12 +26,26 @@ def _esc(text: str, attr: bool = False) -> str:
     return out.replace('"', "&quot;") if attr else out
 
 
+def _match_link(text: str, i: int, last_close: int, image: bool) -> tuple[str, str, int] | None:
+    """``[label](url)`` at ``text[i]`` (``[``): (label, url, end) or None. Bounded: label <= 1000, url <= 2000."""
+    if i > last_close:
+        return None
+    close = text.find("]", i + 1, i + 2 + _MAX_LABEL)
+    if close == -1 or text[close + 1 : close + 2] != "(" or (close == i + 1 and not image):
+        return None
+    m = _URL.match(text, close + 2, close + 3 + _MAX_URL)
+    if m is None or (not m.group(1) and not image):
+        return None
+    return text[i + 1 : close], m.group(1), m.end()
+
+
 def _inline(text: str, depth: int = 0) -> str:
     """Inline spans of ``text``; whatever is not a recognised, closed span is emitted escaped and literal."""
     if depth > _MAX_INLINE_DEPTH:
         return _esc(text)
     out: list[str] = []
     i = 0
+    last_close = text.rfind("]")
     while i < len(text):
         char = text[i]
         if char == "`":
@@ -38,18 +54,18 @@ def _inline(text: str, depth: int = 0) -> str:
                 out.append(f"<code>{_esc(text[i + 1 : end])}</code>")
                 i = end + 1
                 continue
-        elif char == "!" and (m := _IMAGE.match(text, i)):
-            alt, url = m.group(1), m.group(2)
+        elif char == "!" and text[i + 1 : i + 2] == "[" and (found := _match_link(text, i + 1, last_close, True)):
+            alt, url, end = found
             if _SAFE_URL.match(url):
                 out.append(f'<img src="{_esc(url, True)}" alt="{_esc(alt, True)}"/>')
             else:
                 out.append(_esc(alt))
-            i = m.end()
+            i = end
             continue
-        elif char == "[" and (m := _LINK.match(text, i)):
-            label, url = _inline(m.group(1), depth + 1), m.group(2)
+        elif char == "[" and (found := _match_link(text, i, last_close, False)):
+            label, url, end = _inline(found[0], depth + 1), found[1], found[2]
             out.append(f'<a href="{_esc(url, True)}">{label}</a>' if _SAFE_URL.match(url) else label)
-            i = m.end()
+            i = end
             continue
         elif text.startswith("**", i):
             end = text.find("**", i + 2)
@@ -116,8 +132,20 @@ def _list(lines: list[str]) -> list[str]:
     return html
 
 
+def _is_table_sep(line: str) -> bool:
+    return all(_TABLE_SEP_CELL.fullmatch(cell) for cell in _cells(line))
+
+
 def _is_table_start(lines: list[str], i: int) -> bool:
-    return "|" in lines[i] and i + 1 < len(lines) and "|" in lines[i + 1] and bool(_TABLE_SEP.match(lines[i + 1]))
+    return "|" in lines[i] and i + 1 < len(lines) and "|" in lines[i + 1] and _is_table_sep(lines[i + 1])
+
+
+def _heading_text(rest: str) -> str:
+    """Heading text without the optional closing ``#`` sequence (linear; only ``" ##"`` counts as closing)."""
+    without = rest.rstrip("#")
+    if without != rest and (not without or without[-1].isspace()):
+        return without.rstrip()
+    return rest
 
 
 def markdown_to_xhtml(text: str) -> str:
@@ -148,7 +176,7 @@ def markdown_to_xhtml(text: str) -> str:
         elif m := _HEADING.match(stripped):
             flush()
             level = len(m.group(1))
-            blocks.append(f"<h{level}>{_inline(m.group(2))}</h{level}>")
+            blocks.append(f"<h{level}>{_inline(_heading_text(m.group(2)))}</h{level}>")
             i += 1
         elif _HR.match(line):
             flush()

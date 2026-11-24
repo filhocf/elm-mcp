@@ -105,11 +105,23 @@ create_requirement(
 )
 ```
 
-`ELM_RM_CREATE_FALLBACK_BYTES` (default 4096, read per call): if the server answers the creation POST with an
+`ELM_RM_CREATE_FALLBACK_BYTES` (default 4096, read per call; zero, negative or invalid uses 4096): if the server answers the creation POST with an
 explicit 403 and the content is larger than this many bytes, the requirement is created without text and the
-content is applied by PUT with `If-Match`, confirmed by a re-read. The result then carries
+content is applied by PUT with `If-Match`; the PUT must be accepted (2xx) and the re-read confirms that the
+requirement exists and its ETag changed (the content itself is not compared). The result then carries
 `content_applied`; if the PUT fails it is `false`, the requirement exists (`uri`) and a `warning` says so;
 nothing is deleted. A POST is never resent after a timeout.
+
+Limits and cautions for `content`:
+
+- `ELM_RM_MAX_CONTENT_BYTES` (default 1048576, read per call): larger content is refused before any request.
+- `content_format="xhtml"` only validates and wraps: it does NOT remove active content (`script`, `style`,
+  `iframe`...). Use `html` (sanitized) or `markdown` for untrusted text.
+- In `html`, an unclosed `<script>x` (or a `<script ` without `>`) removes everything up to the end of the text.
+- `html` and `xhtml` refuse comments (`<!--`), CDATA (`<![CDATA[`) and processing instructions (`<?`).
+- Markdown links accept one level of balanced parentheses in the URL (`[a](http://x/a(b))`); labels are limited to
+  1000 and URLs to 2000 characters (longer ones stay as literal text).
+- `update_requirement` warns when the re-read after the PUT returns the same ETag as before.
 
 ## Creating Work Items
 
