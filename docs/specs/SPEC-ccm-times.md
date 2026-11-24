@@ -1,6 +1,6 @@
 # SPEC — CCM: listar times (Team Areas) de uma project area
 
-**Status:** PLANNED (G0 FEITO em leitura viva, 24/nov/2026) · **Release:** v0.7.0 · **Origem da ideia:** tool `listar_times` do cadu-ia (só a necessidade; a implementação é nossa, ADR-006)
+**Status:** IMPLEMENTADA (G4, aguarda G5 e aceitação viva) (G0 FEITO em leitura viva, 24/nov/2026) · **Release:** v0.7.0 · **Origem da ideia:** tool `listar_times` do cadu-ia (só a necessidade; a implementação é nossa, ADR-006)
 
 ## Contexto
 Criar work item exige `team_area`/`filed_against` válidos por project area. Hoje o usuário descobre o time por `inspect_workitem` de um item existente ou por `list_fields`. Falta uma forma direta de listar os times ativos.
@@ -22,7 +22,7 @@ Rota: **Process REST** (item 2), por project area, uma chamada. É a API de proc
 - O sistema DEVE tratar a resposta XML sem expandir entidades (recusar DTD/`<!ENTITY>` como já faz o parser de RDF/XML) e ignorar blocos sem nome ou sem URL.
 - O sistema DEVE usar o cache de discovery (TTL) e `refresh=True` o ignora.
 - SE o Process REST responder 401/403/404, ENTÃO o sistema DEVE devolver erro com o gate (SPEC-diagnostico-gate), nunca lista vazia como sucesso.
-- A tool DEVE ser somente leitura (`readOnlyHint`), e `AGENTS.md`/`docs/TOOLS.md`/CHANGELOG/snapshot de contrato DEVEM ser atualizados no mesmo PR (36 tools).
+- A tool DEVE ser somente leitura (`readOnlyHint`), e `AGENTS.md`/`docs/TOOLS.md`/CHANGELOG/snapshot de contrato DEVEM ser atualizados no mesmo PR (41 tools: 22 de leitura + 19 que não são somente leitura).
 
 ## Gates
 G0 → G3 (respx com a fixture) → G4 → G5 → aceitação viva (somente leitura).

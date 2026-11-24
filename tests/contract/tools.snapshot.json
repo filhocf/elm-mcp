@@ -551,6 +551,29 @@
       ]
     },
     {
+      "name": "list_teams",
+      "read_only": true,
+      "parameters": [
+        {
+          "name": "project",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "include_archived",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        },
+        {
+          "name": "refresh",
+          "type": "boolean",
+          "required": false,
+          "default": false
+        }
+      ]
+    },
+    {
       "name": "list_time",
       "read_only": true,
       "parameters": [
