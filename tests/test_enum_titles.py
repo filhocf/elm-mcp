@@ -762,3 +762,10 @@ async def test_set_field_id_matching_its_own_label_is_not_ambiguous(env):
     item = _id_label_env(env, [("5", "5"), ("a", "Alfa")])
     await server.set_field("100", FIELD, "5")
     assert item.put_body()[FIELD] == {"rdf:resource": f"{enum_url()}/5"}
+
+
+def test_enumeration_segment_with_a_trailing_newline_is_rejected():
+    from elm_mcp import oslc
+
+    assert oslc._PLAIN_SEGMENT_RE.fullmatch("a\n") is None
+    assert oslc._PLAIN_SEGMENT_RE.fullmatch("literal.l38") is not None

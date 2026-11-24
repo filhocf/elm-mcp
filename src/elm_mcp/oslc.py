@@ -2072,7 +2072,7 @@ async def list_shape_properties(shape_uri: str) -> list[dict]:
 
 _ENUMERATIONS_SEGMENT = "/oslc/enumerations/"
 _ENUMERATION_MAX_BYTES = 5 * 1024 * 1024
-_PLAIN_SEGMENT_RE = _re.compile(r"^[A-Za-z0-9_.\-]+$")
+_PLAIN_SEGMENT_RE = _re.compile(r"[A-Za-z0-9_.\-]+")
 _LABEL_TAGS = ("{http://www.w3.org/2000/01/rdf-schema#}label", f"{{{NS['dcterms']}}}title")
 
 
@@ -2092,7 +2092,7 @@ def _enumeration_of(value_uri: str) -> tuple[str, str] | None:
     parts = tail.split("/")
     if not sep or len(parts) != 3:  # {pa}/{enum}/{literal}
         return None
-    if not all(_PLAIN_SEGMENT_RE.match(p) and p not in (".", "..") for p in parts):
+    if not all(_PLAIN_SEGMENT_RE.fullmatch(p) and p not in (".", "..") for p in parts):
         return None  # '..', '.', '%2e%2e', '%2f'...: the segment would leave the enumerations path
     host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
     netloc = f"{host}:{parsed.port}" if parsed.port else host
