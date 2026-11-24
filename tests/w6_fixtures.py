@@ -59,6 +59,16 @@ FIXTURE_WORKITEM = "https://elm.example.com/ccm/resource/itemName/com.ibm.team.w
 FIXTURE_SCRIPT = f"{QM_CTX}/resources/com.ibm.rqm.planning.VersionedExecutionScript/_ID002"
 
 
+# Qualified element name the live ETM requires for the POST node of each supported type
+# (``oslc_qm:TestSuite`` is refused with 400; TestSuite lives in the ``rqm`` namespace).
+TYPED = {
+    "TestCase": f"{{{QM_NS}}}TestCase",
+    "TestPlan": f"{{{QM_NS}}}TestPlan",
+    "TestScript": f"{{{QM_NS}}}TestScript",
+    "TestSuite": f"{{{RQM}}}TestSuite",
+}
+
+
 def creation_url(type_name: str) -> str:
     return FACTORIES[type_name][0]
 
@@ -304,6 +314,8 @@ class QmWriteServer(w3.QmServer):
             return httpx.Response(400, text=f"not well-formed: {exc}")
         if len(nodes) != 1:
             return httpx.Response(400, text="exactly one resource expected")
+        if nodes[0].tag != TYPED.get(type_name):  # like the live ETM (issue #78): exact typed node
+            return httpx.Response(400, text="resource node must be typed")
         props = list(nodes[0])
         titles = [p for p in props if p.tag == q(DCTERMS, "title")]
         descriptions = [p for p in props if p.tag == q(DCTERMS, "description")]
