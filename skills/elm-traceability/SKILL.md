@@ -43,17 +43,19 @@ tested) and `get_qm_resource(uri)` (its `links`). See the **`elm-qm`** skill.
 
 - **Inputs.** `link_workitems`/`unlink_workitems` take work item **ids**. `link_artifacts` and
   `link_test_case` take full resource **URIs** on the configured `ELM_URL`; another host is refused before
-  any request. `link_test_case` also refuses a target with a query string, fragment, `%` or `..`, and
-  accepts only a plain QM resource path.
+  any request. `link_test_case` also requires `test_case` to be a QM resource path, and `target` to be a plain URI
+  (no query string, fragment, `%` or `..`) of an RM requirement (`validatesRequirement`) or of a CCM work
+  item (`testsChangeRequest`); `unlink_test_case` only checks the origin of the target.
 - **The source must be the right kind.** `link_artifacts` needs a CCM work item URI as `source_uri`;
   `link_test_case` needs a TestCase URI. Source and target must differ.
 - **Idempotent.** Linking something already linked returns `changed: false` and writes nothing.
   Unlinking a target that is not linked is an error and writes nothing.
 - **Other links are preserved.** The PUT resends the links that were already there; only the one you
   asked for is added or removed. Concurrent edits give a `[conflito]` (412): re-read and retry.
-- **Confirmation.** Every tool re-reads after the PUT. If the re-read disagrees: `link_test_case` /
-  `unlink_test_case` say the PUT SUCCEEDED and the test case WAS changed; `link_workitems` and
-  `link_artifacts` say the server accepted the write but the re-read does not show it, and do not retry.
+- **Confirmation.** Every tool re-reads after the PUT. If the re-read fails or disagrees:
+  `link_test_case` / `unlink_test_case` say the PUT SUCCEEDED and the test case WAS changed;
+  `link_workitems` and `link_artifacts` say the server accepted the write but the re-read does not show
+  the expected links (`link_artifacts` lists the lost and unexpected targets), and do not retry.
   In every case read the resource before trying again.
 - Removal is symmetric: use the `unlink_*` tool with the same arguments.
 

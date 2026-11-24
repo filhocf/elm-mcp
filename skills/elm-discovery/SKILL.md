@@ -105,7 +105,8 @@ inspect_workitem(id="100200")
 
 - **`type` in `list_fields` and in `create_requirement`.** `list_fields` takes a shape *title*
   (case-insensitive). `create_requirement(type=...)` takes the shape's `shape_uri` **or** its title, both
-  from `list_types(domain="rm", project=...)`; an unknown value is refused listing the valid types.
+  from `list_types(domain="rm", project=...)`; an unknown title is refused listing the valid types, while a
+  URI is used as given (it is not checked against the list).
 - **RM vs CCM discovery differ.** RM (DOORS Next) uses OSLC 1.0 catalog shapes, CCM (RTC/EWM)
   uses OSLC 2.0; the tools abstract this but the shapes returned look different per domain.
 - **Enumerations:** when `list_fields` reports `allowed_values` for a field, you must use one

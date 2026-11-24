@@ -38,8 +38,7 @@ Neither is hardcoded — you discover them first. See the
 
 1. **Search.** `search_requirements(project, query=None, limit=None)` runs an OSLC query over the RM
    project (in the project's configuration/stream). Omit `query` to list; pass an OSLC query to filter
-   (see `docs/USAGE.md`). It returns `{"items": [...], "truncated": bool}` plus `total` and `configuration` (the stream used)
-   when the server reports them; `truncated=true` means there are more items than `limit`.
+   (see `docs/USAGE.md`). It returns `{"items": [...], "truncated": bool}` plus `total` (when the server reports it) and `configuration` (the stream used, when known); `truncated=true` means there are more items than `limit`.
 2. **Read one.** `get_requirement(uri)` fetches a single requirement by its OSLC URI (the
    URI comes from a search result or is already known).
 
@@ -53,7 +52,7 @@ Neither is hardcoded — you discover them first. See the
 5. **Create.** `create_requirement(project, title, content, folder=None, type=None,
    if_exists="error", content_format="html")`. **`type` is required at runtime**: pass the
    `shape_uri` or the `title` from `list_types(domain="rm", ...)`; without it (or with an unknown
-   title) the call is refused listing the valid types.
+   title) the call is refused listing the valid types; a URI is used as given, without checking it.
    `content` is stored in `jazz_rm:primaryText`, which only accepts well-formed **XHTML** with one
    root `<div xmlns="http://www.w3.org/1999/xhtml">` (the tool adds it, never doubles it).
    `content_format` says what you are sending:
