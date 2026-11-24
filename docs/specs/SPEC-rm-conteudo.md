@@ -6,7 +6,7 @@
 - O RM só aceita o corpo em `jazz_rm:primaryText` como literal XHTML bem formado, com um `<div xmlns="http://www.w3.org/1999/xhtml">` na raiz. O conteúdo entra sem escape dentro do RDF/XML.
 - Hoje `create_requirement` e `update_requirement` sanitizam HTML (`sanitize_html_to_xhtml`) e embrulham num `<div>`. Se o conteúdo já traz um `<div xmlns=...>` na raiz, o resultado tem div duplo (a leitura de um requisito existente devolve esse formato).
 - Markdown e texto puro não são aceitos pelo ALM: alguém precisa converter. Hoje o chamador faz isso.
-- Relato de terceiros: o POST de criação com HTML grande ou complexo devolve 403; o PUT do mesmo conteúdo é aceito. **Não reproduzido** em 24/nov/2026 no projeto de referência: um POST de 8,4 KB de HTML simples devolveu 201 direto. O fallback em 2 passos só dispara após um 403 real e segue sem teste ao vivo.
+- Relato de terceiros: o POST de criação com HTML grande ou complexo devolve 403; o PUT do mesmo conteúdo é aceito. **Não reproduzido** em 24/nov/2026 no projeto de referência: um POST de 8,4 KB de HTML devolveu 201 direto. O fallback em 2 passos só dispara após um 403 real e segue sem teste ao vivo.
 
 ## Critério de aceite (EARS)
 - O sistema DEVE produzir exatamente UM `<div xmlns="http://www.w3.org/1999/xhtml">` na raiz, mesmo quando o conteúdo já vem com esse div (idempotência: aplicar duas vezes dá o mesmo resultado). Vale para `create_requirement` e `update_requirement`.

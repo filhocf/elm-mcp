@@ -62,7 +62,7 @@ ETM reading and cross-domain links (SPEC-qm-leitura, SPEC-oslc-links, wave W3):
 - `get_qm_resource(uri)`: normalized properties and grouped links (`validates_requirement`, `tests_change_request`, scripts, results).
 - `get_test_coverage(project)`: requirements validated and work items tested, per test case.
 - `get_test_results(project, test_case=None)`: verdict (URI of the verdict resource) and `verdict_name` (its readable final fragment, e.g. `inconclusive`), points per status and originating execution record. Property names confirmed in live reading.
-- `link_artifacts(source_uri, target_uri, link_type)`: links a work item to an RM/QM artifact (13 `oslc_cm` types); partial PUT with `If-Match`, confirmed by re-reading. Validated live on 24/nov/2026 for `implementsRequirement`, `affectsRequirement` and `testedByTestCase`; the other types are not yet exercised live.
+- `link_artifacts(source_uri, target_uri, link_type)`: links a work item to an RM/QM artifact (13 `oslc_cm` types); partial PUT with `If-Match`, confirmed by re-reading. Validated live on 24/nov/2026 for `implementsRequirement`, `affectsRequirement` and `testedByTestCase` (idempotent repeat checked only for `implementsRequirement`); the other types are not yet exercised live.
 - `unlink_artifacts(source_uri, target_uri, link_type)`: removes only that link, keeping the others.
 
 CCM collaboration (SPEC-ccm-colaboracao, wave W2):

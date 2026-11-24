@@ -25,7 +25,7 @@ cross-domínio: `implementsRequirement`, `tracksRequirement`, `affectsRequiremen
 
 **Escopo da W3:** `link_artifacts` com a ORIGEM sendo um work item (CCM) e o destino em RM ou QM, escrevendo `oslc_cm:<tipo>` por PUT
 parcial. Escrever links a partir do QM (`oslc_qm:validatesRequirement`, `oslc_qm:testsChangeRequest`) depende de escrita no QM e fica
-na `SPEC-qm-write` (W6). A escrita foi verificada ao vivo em 24/nov/2026 (itens descartáveis): `link_artifacts`/`unlink_artifacts` com `implementsRequirement` (work item → requisito RM), `affectsRequirement` e `testedByTestCase` (work item → caso de teste ETM) vincularam, repetir devolveu `changed: false`, desvincularam e a releitura confirmou. O formato do PUT é o mesmo de `link_workitems`. Os demais 10 tipos da lista seguem sem verificação ao vivo.
+na `SPEC-qm-write` (W6). A escrita foi verificada ao vivo em 24/nov/2026 (itens descartáveis): `link_artifacts`/`unlink_artifacts` com `implementsRequirement` (work item → requisito RM), `affectsRequirement` e `testedByTestCase` (work item → caso de teste ETM) vincularam e desvincularam, e a releitura confirmou; repetir o vínculo devolveu `changed: false` só no caso de `implementsRequirement` (nos outros dois não foi repetido). O formato do PUT é o mesmo de `link_workitems`. Os demais 10 tipos da lista seguem sem verificação ao vivo.
 
 ## Critério de aceite (EARS)
 

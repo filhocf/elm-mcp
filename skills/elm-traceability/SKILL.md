@@ -62,8 +62,8 @@ tested) and `get_qm_resource(uri)` (its `links`). See the **`elm-qm`** skill.
 ## Gotchas
 
 - **Validated live on 24/nov/2026:** `link_artifacts` with `implementsRequirement`, `affectsRequirement` and
-  `testedByTestCase`, and `link_test_case` with `validatesRequirement` and `testsChangeRequest` (link, repeat,
-  unlink, re-read). The other 10 `link_artifacts` types follow the same call but were not exercised live: try
+  `testedByTestCase`, and `link_test_case` with `validatesRequirement` and `testsChangeRequest` (link, unlink, re-read; a repeated
+  `validatesRequirement` link returned `changed: false`, the others were not repeated). The other 10 `link_artifacts` types follow the same call but were not exercised live: try
   them first on a disposable item.
 - `get_requirement(uri)` returns the RM requirement as it is stored; the links appear on the work item or
   test case that owns them, not always on the requirement.
