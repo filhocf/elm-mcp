@@ -223,3 +223,71 @@ def test_active_content_nested_many_levels_is_cleaned_or_refused():
     except ValueError:
         return
     assert "<script" not in out.lower()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<scr<head></head>ipt>alert(1)</scr<head></head>ipt>",
+        "<scr<html>ipt>alert(1)</scr</html>ipt>",
+        "<scr<body>ipt>alert(1)</scr</body>ipt>",
+        "<scr<meta charset='x'>ipt>alert(1)</scr<meta charset='x'>ipt>",
+        "<scr\U0001f600ipt>alert(1)</scr\U0001f600ipt>",
+        "<scr\ud800ipt>alert(1)</scr\ud800ipt>",
+        "<ifr<head></head>ame src='x'></ifr<head></head>ame>",
+    ],
+)
+def test_active_content_reassembled_by_other_removals_is_gone(payload):
+    from elm_mcp.oslc import prepare_content
+
+    try:
+        out = prepare_content(payload, "html")
+    except ValueError:
+        return
+    low = out.lower()
+    assert "<script" not in low
+    assert "<iframe" not in low
+
+
+def test_sanitize_is_a_fixed_point():
+    from elm_mcp.oslc import sanitize_html_to_xhtml
+
+    for payload in ["<scr<head></head>ipt>x</scr<head></head>ipt>", "<p>a &amp; b</p>", "<br><img src=x>"]:
+        once = sanitize_html_to_xhtml(payload)
+        assert sanitize_html_to_xhtml(once) == once
+
+
+def test_deeply_nested_root_divs_unwrap_in_linear_time():
+    import time
+
+    from elm_mcp.oslc import _unwrap_root_div
+
+    ns = "http://www.w3.org/1999/xhtml"
+    n = 20000
+    text = f'<div xmlns="{ns}">' * n + "x" + "</div>" * n
+    t0 = time.perf_counter()
+    out = _unwrap_root_div(text)
+    assert time.perf_counter() - t0 < 1.0
+    assert out == "x"
+
+
+def test_root_div_not_enclosing_everything_is_kept():
+    from elm_mcp.oslc import _unwrap_root_div
+
+    ns = "http://www.w3.org/1999/xhtml"
+    a = f'<div xmlns="{ns}">a</div>b'
+    b = f'<div xmlns="{ns}">a</div><div>b</div>'
+    c = f'<div xmlns="{ns}"><div>keep</div></div>'
+    assert _unwrap_root_div(a) == a
+    assert _unwrap_root_div(b) == b
+    assert _unwrap_root_div(c) == "<div>keep</div>"
+
+
+def test_replace_primary_text_handles_an_empty_self_closing_literal():
+    from elm_mcp.oslc import _replace_primary_text
+
+    body = '<dcterms:title>t</dcterms:title><jazz_rm:primaryText rdf:parseType="Literal"/><x:y/>'
+    out = _replace_primary_text(body, '<div xmlns="http://www.w3.org/1999/xhtml">new</div>')
+    assert out.count("<jazz_rm:primaryText") == 1
+    assert out.endswith("</jazz_rm:primaryText><x:y/>")
+    assert "new" in out

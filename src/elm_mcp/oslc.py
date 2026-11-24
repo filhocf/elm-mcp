@@ -1182,7 +1182,22 @@ def _strip_active(content: str) -> str:
 
 
 def sanitize_html_to_xhtml(html: str) -> str:
-    """Convert HTML to XHTML valid for the RM primaryText.
+    """Convert HTML to XHTML valid for the RM primaryText, repeating the whole cleaning until the result is stable.
+
+    One pass can splice neighbours into a new active tag (``<scr<script></script>ipt>``, or a removed ``<head></head>``
+    or emoji between the halves of ``<scr...ipt>``), so the pass is repeated until the output no longer changes.
+    """
+    content = html or ""
+    for _ in range(20):
+        cleaned = _sanitize_pass(content)
+        if cleaned == content:
+            return cleaned
+        content = cleaned
+    raise ValueError("requirement content could not be cleaned of active content")
+
+
+def _sanitize_pass(html: str) -> str:
+    """One cleaning pass (see sanitize_html_to_xhtml).
 
     Mirrors publicar_elm.sanitizar_html (G0 §E pt.4): strip html/head/body/meta
     wrappers, close void tags (br/hr/img/input), escape lone ampersands without
@@ -1224,36 +1239,56 @@ def sanitize_html_to_xhtml(html: str) -> str:
 
 
 _ASTRAL = _re.compile("[\U00010000-\U0010ffff\ud800-\udfff]")
-_ROOT_DIV = _re.compile(
-    rf"""^<div\s+xmlns=(?:"{_re.escape(_XHTML_NS)}"|'{_re.escape(_XHTML_NS)}')\s*>(.*)</div>$""", _re.DOTALL
-)
+_ROOT_OPEN = _re.compile(rf"""<div\s+xmlns=(?:"{_re.escape(_XHTML_NS)}"|'{_re.escape(_XHTML_NS)}')\s*>""")
+_DIV_CLOSE = _re.compile(r"</div\s*>", _re.IGNORECASE)
 _DIV_OPEN = _re.compile(r"<(/?)div\b", _re.IGNORECASE)
 
 
 def _div_tokens(text: str):
-    """(is_closing, is_self_closing) of every ``<div ...>`` / ``</div>`` tag, in linear time."""
+    """(start, end, is_closing, is_self_closing) of every ``<div ...>`` / ``</div>`` tag, in linear time."""
     pos = 0
     while (m := _DIV_OPEN.search(text, pos)) is not None:
         gt = text.find(">", m.end())
         if gt == -1:
             return
-        yield bool(m.group(1)), text[m.end() : gt].endswith("/")
+        yield m.start(), gt + 1, bool(m.group(1)), text[m.end() : gt].endswith("/")
         pos = gt + 1
 
 
 def _unwrap_root_div(content: str) -> str:
-    """Remove the XHTML root ``<div xmlns=...>`` (repeatedly) when it wraps the whole content, so the caller wraps once."""
-    while (m := _ROOT_DIV.match(content)) is not None:
-        inner = m.group(1)
-        depth = 0
-        for closing, self_closing in _div_tokens(inner):
-            if self_closing:  # <div/>
-                continue
-            depth += -1 if closing else 1
-            if depth < 0:  # the first div closes before the end: it is not the root of everything
-                return content
-        content = inner.strip()
-    return content
+    """Remove every XHTML root ``<div xmlns=...>`` that wraps the whole content, so the caller wraps once.
+
+    One linear pass: the div tags are paired once with a stack, then the levels are peeled from the outside in, each
+    only while its matching close is the very end of what is left (a div that closes earlier is not a root).
+    """
+    tokens = list(_div_tokens(content))
+    match: dict[int, int] = {}
+    stack: list[int] = []
+    for i, (_s, _e, closing, self_closing) in enumerate(tokens):
+        if self_closing:
+            continue
+        if not closing:
+            stack.append(i)
+        elif stack:
+            match[stack.pop()] = i
+        else:
+            return content  # unbalanced: leave it for the well-formedness check
+    if stack:
+        return content
+    lo, hi = 0, len(content)
+    for i, (start, end, closing, self_closing) in enumerate(tokens):
+        if closing or self_closing or start != lo or _ROOT_OPEN.fullmatch(content, start, end) is None:
+            break
+        j = match[i]
+        close_start, close_end = tokens[j][0], tokens[j][1]
+        if close_end != hi or _DIV_CLOSE.fullmatch(content, close_start, close_end) is None:
+            break
+        lo, hi = end, close_start
+        while lo < hi and content[lo].isspace():
+            lo += 1
+        while hi > lo and content[hi - 1].isspace():
+            hi -= 1
+    return content[lo:hi]
 
 
 CONTENT_FORMATS = ("html", "xhtml", "markdown")
@@ -1700,6 +1735,9 @@ def _replace_primary_text(body: str, primary_content: str) -> str:
     """Swap the content of jazz_rm:primaryText, ending at its LAST closing tag (a server-side comment inside the
     literal may hold a ``</jazz_rm:primaryText>`` of its own that a non-greedy match would stop at)."""
     open_m = _re.search(r"<jazz_rm:primaryText[^>]*>", body)
+    if open_m is not None and open_m.group(0).endswith("/>"):  # an empty, self-closing literal
+        tag = f'<jazz_rm:primaryText rdf:parseType="Literal">{primary_content}</jazz_rm:primaryText>'
+        return body[: open_m.start()] + tag + body[open_m.end() :]
     close = body.rfind("</jazz_rm:primaryText>")
     if open_m is None or close < open_m.end():
         raise ValueError("could not locate the content of jazz_rm:primaryText in the requirement")
