@@ -16,7 +16,8 @@ from .test_rm_conteudo import CREATED_URI, DIV, EXISTING_RDF, _update_routes, pr
 from .w1_fixtures import BASE
 
 SIZE = 200_000
-LIMIT = 1.0
+# CI runs with coverage tracing (about 10x slower than a plain run); the quadratic cases this guards against took 10-110 s
+LIMIT = 5.0
 
 
 def _timed(fn, arg):
@@ -267,7 +268,7 @@ def test_deeply_nested_root_divs_unwrap_in_linear_time():
     text = f'<div xmlns="{ns}">' * n + "x" + "</div>" * n
     t0 = time.perf_counter()
     out = _unwrap_root_div(text)
-    assert time.perf_counter() - t0 < 1.0
+    assert time.perf_counter() - t0 < LIMIT
     assert out == "x"
 
 
