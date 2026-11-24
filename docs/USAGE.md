@@ -126,7 +126,7 @@ Limits and cautions for `content`:
 ## Creating Work Items
 
 ```python
-# Minimal (auto-discovers category and iteration)
+# Minimal (iteration auto-discovered; the server applies its default category)
 create_workitem(project="MY PROJECT (KEY)", title="My Task", type="task")
 
 # With explicit fields (project-specific attributes)
@@ -166,8 +166,8 @@ update_workitem(id="629772", custom_fields={"rtc_cm:someField": "value"})
 
 ## Notes
 
-- Category auto-discovery picks the first category of the project; pass `filed_against`
-  explicitly when the project has more than one.
+- The category is not auto-discovered: without `filed_against` the server applies its own default;
+  pass `filed_against` (a category URI from `list_fields`/`inspect_workitem`) to choose it.
 - Current-iteration auto-discovery prefers bounded iterations (with an end date); pass
   `planned_for` explicitly if your sprint is not picked up.
 - `list_iterations` fetches details per iteration and can be slow on projects with many.

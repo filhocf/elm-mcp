@@ -2,7 +2,7 @@
 name: elm-requirements
 description: Search, read, create and update requirements in an IBM ELM RM (DOORS Next) project area through elm-mcp. Use when you need to find existing requirements, read one by URI, or author/revise a requirement with HTML content filed under the right folder and shape.
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
   keywords: "requirement, requirements, rm, doors, doors next, create, update, search, oslc, primarytext, xhtml, folder, instanceshape, elm"
 ---
 
@@ -12,10 +12,11 @@ metadata:
 
 Work with requirements in an IBM ELM **RM** (DOORS Next) project area: find them, read
 them, create new ones and revise existing ones. Covers:
-`search_requirements`, `get_requirement`, `create_requirement`, `update_requirement`.
+`search_requirements`, `get_requirement`, `create_requirement`, `update_requirement`,
+`delete_requirement`.
 
-Creating a requirement needs a target folder and (optionally) a specific requirement type
-(`instanceShape`). Neither is hardcoded — you discover them first. See the
+Creating a requirement needs a requirement **type** (required) and, usually, a target folder.
+Neither is hardcoded — you discover them first. See the
 **`elm-discovery`** skill, which is the prerequisite for the write steps here.
 
 ## When to use
@@ -35,31 +36,54 @@ Creating a requirement needs a target folder and (optionally) a specific require
 
 ### Read
 
-1. **Search.** `search_requirements(project, query=None)` runs an OSLC query over the RM
-   project. Omit `query` to list; pass an OSLC query to filter (see `docs/USAGE.md`).
+1. **Search.** `search_requirements(project, query=None, limit=None)` runs an OSLC query over the RM
+   project (in the project's configuration/stream). Omit `query` to list; pass an OSLC query to filter
+   (see `docs/USAGE.md`). It returns `{"items": [...], "truncated": bool}` plus `total` (when the server reports it) and `configuration` (the stream used, when known); `truncated=true` means there are more items than `limit`.
 2. **Read one.** `get_requirement(uri)` fetches a single requirement by its OSLC URI (the
    URI comes from a search result or is already known).
 
 ### Create (discover first)
 
-3. **Resolve the type (instanceShape URI).** `list_types(domain="rm", project=...)` returns
-   `[{"title", "shape_uri", ...}]`. Pick the entry whose `title` is the requirement kind you
-   want and keep its `shape_uri` — that is the value for `create_requirement(type=...)`.
-   `type` is a **URI, not a title.**
+3. **Resolve the type.** `list_types(domain="rm", project=...)` returns
+   `[{"title", "shape_uri", ...}]`. Pick the entry for the requirement kind you want; its `title`
+   or its `shape_uri` is the value for `create_requirement(type=...)`.
 4. **Resolve the folder URI.** `list_folders(project)` returns `[{"title", "uri"}]`; take the
    `uri` of your target folder for `create_requirement(folder=...)`.
-5. **Create.** `create_requirement(project, title, content, folder=None, type=None)`.
-   `content` is **HTML** by default — sanitized to XHTML and stored in `jazz_rm:primaryText`.
-   To send **Markdown**, pass `content_format="markdown"` (headings, lists, tables, code,
-   emphasis, links and images by http/https URL; raw HTML is escaped). `content_format="xhtml"`
-   only validates. A root `<div xmlns=...>` already in the content is not doubled.
-   If you omit `type`/`folder`, the server uses defaults for the project area.
+5. **Create.** `create_requirement(project, title, content, folder=None, type=None,
+   if_exists="error", content_format="html")`. **`type` is required at runtime**: pass the
+   `shape_uri` or the `title` from `list_types(domain="rm", ...)`; without it (or with an unknown
+   title) the call is refused listing the valid types; a URI is used as given, without checking it.
+   `content` is stored in `jazz_rm:primaryText`, which only accepts well-formed **XHTML** with one
+   root `<div xmlns="http://www.w3.org/1999/xhtml">` (the tool adds it, never doubles it).
+   `content_format` says what you are sending:
+   - `html` (default): sanitized (`script`/`style`/`iframe`/`object`/`embed` and emoji removed, void
+     tags closed, lone `&` escaped);
+   - `markdown`: converted by the tool (headings, lists, tables, code, emphasis, links and images by
+     http/https/mailto URL; raw HTML is escaped, never passed through);
+   - `xhtml`: only validated and wrapped — it does **not** remove active content, so use it only for
+     content you already trust.
+   The ALM accepts neither Markdown nor plain text on its own: send one of the three formats above.
+   In `html` and `xhtml`, comments (`<!--`), CDATA and processing instructions are refused (Markdown
+   escapes them instead). Content above `ELM_RM_MAX_CONTENT_BYTES` (default 1 MB) is refused in every
+   format.
+6. **Duplicates.** Before creating, the tool looks for a requirement of the same type, title and
+   folder. `if_exists="error"` (default) refuses and names the existing one, `"return"` hands it back
+   with `created: false`, `"create"` creates anyway. Without `folder` any folder matches (pass
+   `folder`, or use `"return"`/`"create"`). A timeout after the POST re-queries; it never resends.
+7. **Large content.** If the server answers 403 to a large creation POST (over
+   `ELM_RM_CREATE_FALLBACK_BYTES`, default 4096), the tool creates the requirement without text and
+   applies the content by PUT. Check `content_applied` in the result: when it is `false` the
+   requirement exists (see `uri`) but the text was **not** applied — fix it with `update_requirement`,
+   do not create it again.
 
 ### Update
 
-6. **Update.** `update_requirement(uri, title=None, content=None)` performs an OSLC PUT with
-   an ETag (handled for you). Pass the requirement's OSLC URI and only the fields you want to
-   change; `content` follows the same `content_format` (html, xhtml, markdown).
+8. **Update.** `update_requirement(uri, title=None, content=None, content_format="html")` performs an
+   OSLC PUT with an ETag (handled for you). Pass the requirement's OSLC URI and only the fields you
+   want to change; `content` follows the same `content_format`. The tool re-reads after the PUT and
+   warns if the ETag did not change.
+9. **Delete.** `delete_requirement(uri)` is irreversible and unconditional (no ETag check); it is
+   confirmed by re-reading (404/410). Ask the user before calling it.
 
 ## Examples
 
@@ -77,14 +101,16 @@ list_types(domain="rm", project="MY RM PROJECT")
 list_folders(project="MY RM PROJECT")
 # -> pick the target folder; keep its uri
 
-# Minimal create (title + HTML content; server picks default folder/type)
+# Create from Markdown (type = a title or shape_uri from list_types)
 create_requirement(
     project="MY RM PROJECT",
     title="REQ-001 User login",
-    content="<p>As a user I want to log in so that I can access my account.</p>",
+    content="## Goal\nAs a user I want to log in.\n\n- valid user\n- invalid password",
+    type="Functional Requirement",
+    content_format="markdown",
 )
 
-# Create with explicit type (instanceShape URI) and folder (folder URI)
+# Create with explicit type (instanceShape URI) and folder (folder URI), HTML content
 create_requirement(
     project="MY RM PROJECT",
     title="REQ-001 User login",
@@ -103,10 +129,10 @@ update_requirement(
 
 ## Notes / Gotchas
 
-- **`type` is an `instanceShape` URI, not a title.** Resolve the requirement kind via
-  `list_types(domain="rm", ...)` and pass its `shape_uri`. Passing a title will not work.
-- **`content` is HTML by default** (or Markdown with `content_format="markdown"`). It is sanitized to XHTML before being stored in
-  `jazz_rm:primaryText`; well-formed fragments (`<p>…</p>`, lists, etc.) are safest.
+- **`type` is required** and is a `shape_uri` or a type title, both from `list_types(domain="rm", ...)`.
+- **`content` is HTML by default** (Markdown with `content_format="markdown"`). It is always turned into
+  well-formed XHTML before being stored in `jazz_rm:primaryText`; reading a requirement back returns
+  that XHTML, not your original text.
 - **`folder` is a URI** from `list_folders`, not a folder name.
 - **Update is partial.** `update_requirement` only changes the fields you pass; omit what you
   do not want to touch. The ETag is fetched and applied for you.

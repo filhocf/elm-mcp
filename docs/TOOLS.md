@@ -65,7 +65,7 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 
 ## Write (ETM / QM test resources)
 
-Limitation: live acceptance of these writes is pending (writing to the reference ALM is suspended); they are verified against mocks only. Only the title and description are written; the ETM may require data outside OSLC for other types. These types are DEFERRED and refused: `TestExecutionRecord`, `TestResult`, native script steps (`TestScriptStep`) and every type not listed below. `TestCase` creation was verified in a real write (16/nov); `TestPlan`, `TestSuite` and `TestScript` follow the same factory pattern and are to be confirmed.
+Limitation: live acceptance of these writes is pending (writing to the reference ALM is suspended); they are verified against mocks only. Only the title and description are written; the ETM may require data outside OSLC for other types. These types are DEFERRED and refused by create and update: `TestExecutionRecord`, `TestResult`, native script steps (`TestScriptStep`) and every type not listed below (`delete_qm_resource` does not filter by type). `TestCase` creation was verified in a real write (16/nov); `TestPlan`, `TestSuite` and `TestScript` follow the same factory pattern and are to be confirmed.
 
 | Tool | Signature | Description |
 |------|-----------|-------------|
@@ -109,8 +109,9 @@ the `Authorization` header never appear in the message.
   types work without code changes (`docs/specs/SPEC-wi-custom-types.md`).
 - `custom_fields` injects project-specific RDF attributes; values are discovered per project area
   (via the discovery tools), not hardcoded.
-- QM (ETM) is read-only through these tools; test-case write and cross-domain OSLC links
-  (Implements Requirement / Tested By / Affects) are planned (`docs/specs/`, `docs/roadmap.md`).
+- QM (ETM) reads and the title/description writes are in the tables above; cross-domain links are
+  `link_artifacts` (from a work item) and `link_test_case` (from a test case). See the `elm-qm` and
+  `elm-traceability` skills.
 - State changes go through `transition_workitem` (workflow action), not `update_workitem`.
 
 - **Same origin only.** URLs followed from server responses (next pages, workflow states, comment and iteration
