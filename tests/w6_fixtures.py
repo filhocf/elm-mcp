@@ -304,6 +304,8 @@ class QmWriteServer(w3.QmServer):
             return httpx.Response(400, text=f"not well-formed: {exc}")
         if len(nodes) != 1:
             return httpx.Response(400, text="exactly one resource expected")
+        if nodes[0].tag == q(RDF, "Description"):  # like the live ETM (issue #78): the node must be typed
+            return httpx.Response(400, text="resource node must be typed")
         props = list(nodes[0])
         titles = [p for p in props if p.tag == q(DCTERMS, "title")]
         descriptions = [p for p in props if p.tag == q(DCTERMS, "description")]
