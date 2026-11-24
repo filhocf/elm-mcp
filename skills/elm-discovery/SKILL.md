@@ -55,7 +55,8 @@ The core pattern is **list_types → list_fields**, with `list_folders` for RM a
    `{"type", "shape_uri", "required": [...], "optional": [...]}`. `type` is a shape *title*
    from step 2 (case-insensitive); for `ccm` the type `id` or `title`, or the alias `task`/`story`.
    Each field also carries `occurs` and `read_only`. Enumerated fields come with their `allowed_values` — use
-   exactly those values, do not invent them.
+   exactly those values, do not invent them. Each has a `title` when the server's enumeration is readable,
+   otherwise `null` (use the `value_uri` or its last segment then).
 4. **RM only — list folders.** `list_folders(project)` returns `[{"title", "uri"}]`
    (system folders are filtered out). The `uri` is what `create_requirement(folder=...)`
    expects.

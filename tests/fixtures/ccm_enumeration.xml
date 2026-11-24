@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sanitized enumeration document (GET /ccm/oslc/enumerations/{paId}/{enum}, RDF/XML) in the shape the ALM serves:
+     one rdf:Description per literal, the label in rdfs:label. Synthetic labels; one carries an escaped ampersand. -->
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+    xmlns:oslc="http://open-services.net/ns/core#">
+  <rdf:Description rdf:about="https://elm.example.com/ccm/oslc/enumerations/_PA1/com.example.enumeration.categoria">
+    <rdf:type rdf:resource="http://open-services.net/ns/core#Enumeration"/>
+    <rdfs:label>Categoria</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="https://elm.example.com/ccm/oslc/enumerations/_PA1/com.example.enumeration.categoria/com.example.enumeration.categoria.literal.l38">
+    <rdf:type rdf:resource="http://open-services.net/ns/core#Literal"/>
+    <rdfs:label>Demanda / Projeto</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="https://elm.example.com/ccm/oslc/enumerations/_PA1/com.example.enumeration.categoria/com.example.enumeration.categoria.literal.l33">
+    <rdf:type rdf:resource="http://open-services.net/ns/core#Literal"/>
+    <rdfs:label>Outros Trabalhos</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="https://elm.example.com/ccm/oslc/enumerations/_PA1/com.example.enumeration.categoria/com.example.enumeration.categoria.literal.l10">
+    <rdf:type rdf:resource="http://open-services.net/ns/core#Literal"/>
+    <rdfs:label>Pesquisa &amp; Desenvolvimento</rdfs:label>
+  </rdf:Description>
+</rdf:RDF>

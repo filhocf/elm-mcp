@@ -85,6 +85,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- `set_field` on an enumerated field accepts the label (exact, then case- and edge-space-insensitive); an unknown label is refused listing the valid labels, and a label shared by several values is refused as ambiguous, listing their ids (the id or the full URI always works) (#77).
 - **BREAKING (#70):** password decoding no longer guesses.
   - `ELM_PASSWORD` is now used as raw text. If yours was base64 without a prefix, write it as `ELM_PASSWORD=b64:<base64>` (the part after `b64:` is stripped of surrounding whitespace). To use a password that literally starts with `b64:`, write `b64:b64:...` (`b64:b64:x` is the text `b64:x`). `b64:` followed by invalid base64 fails at authentication with a clear error naming `ELM_PASSWORD`.
   - A `password` in `~/.elm_creds.json` that is plain text (not base64 of UTF-8) is now an error, with no fallback: the file is only written by `elm-mcp login`, always in base64. Run `elm-mcp login` again. The error is raised when the server tries to authenticate; `import elm_mcp` and `elm-mcp login` still work with an invalid file.
@@ -122,6 +123,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Fixed
 
+- `list_fields` returned `title: null` for every value of an enumerated field whose `allowedValues` lists only references (#77). A value of this server under `/oslc/enumerations/` now gets its label (`rdfs:label` or `dcterms:title`) from the enumeration document, read once per enumeration through the discovery cache (`refresh` honored); if that document cannot be read the title stays `null` and nothing fails.
 - Password decoding no longer corrupts passwords (#70): the `password` in `~/.elm_creds.json` is always decoded as base64 and UTF-8, and `ELM_PASSWORD` is used as is, so a plaintext password that looks like base64, or one with non-ASCII or control characters, comes out intact.
 - `search_requirements` no longer answers 400 (`Undefined namespace prefix` / null configuration) on RM queries with `oslc.where`.
 - `search_requirements` returns one item per requirement instead of one giant raw dictionary, and takes the total from "Query Results: N".

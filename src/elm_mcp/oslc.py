@@ -2065,13 +2065,78 @@ async def list_shape_properties(shape_uri: str) -> list[dict]:
     return props
 
 
-async def list_allowed_values(allowed_values_uri: str) -> list[dict]:
+_ENUMERATIONS_SEGMENT = "/oslc/enumerations/"
+_LABEL_TAGS = ("{http://www.w3.org/2000/01/rdf-schema#}label", f"{{{NS['dcterms']}}}title")
+
+
+def _enumeration_of(value_uri: str) -> tuple[str, str] | None:
+    """(project area, enumeration URL) of a value URI on the ELM server under /oslc/enumerations/, else None.
+
+    The enumeration URL is BUILT here (the value URI minus its last segment); nothing from a response is followed.
+    """
+    try:
+        assert_same_origin(value_uri)
+    except ValueError:
+        return None
+    parsed = urlparse(value_uri)
+    head, sep, tail = parsed.path.partition(_ENUMERATIONS_SEGMENT)
+    parts = tail.split("/")
+    if not sep or len(parts) != 3 or not all(parts):  # {pa}/{enum}/{literal}
+        return None
+    return parts[0], f"{parsed.scheme}://{parsed.netloc}{head}{sep}{parts[0]}/{parts[1]}"
+
+
+async def _load_enumeration_labels(url: str) -> dict[str, str]:
+    """GET an enumeration document and map each rdf:Description's rdf:about to its label (DTD/entities refused)."""
+    text = await _get_xml_text(url)
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        raise ValueError("invalid RDF/XML response: DTD/entity declarations are not accepted")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise ValueError(f"invalid RDF/XML response: {exc}") from exc
+    labels: dict[str, str] = {}
+    for desc in root.iter(f"{{{NS['rdf']}}}Description"):
+        about = desc.get(f"{{{NS['rdf']}}}about")
+        label = next((el.text.strip() for tag in _LABEL_TAGS for el in desc.findall(tag) if el.text), None)
+        if about and label:
+            labels[about] = label
+    return labels
+
+
+async def _fill_enumeration_titles(values: list[dict]) -> None:
+    """Fill the missing titles from the enumeration documents (one cached read each); a failed read leaves None."""
+    wanted: dict[str, tuple[str, list[dict]]] = {}
+    for value in values:
+        found = _enumeration_of(value["value_uri"]) if value["title"] is None else None
+        if found:
+            wanted.setdefault(found[1], (found[0], []))[1].append(value)
+    for url, (area, group) in wanted.items():
+        try:
+            labels = await cache.get_or_fetch(area, f"enum:{url}", lambda url=url: _load_enumeration_labels(url))
+        except (httpx.HTTPError, ValueError) as exc:  # titles are an enrichment: never fail the caller
+            logger.warning("enumeration %s could not be read (%s); titles stay empty", url, type(exc).__name__)
+            continue
+        for value in group:
+            value["title"] = labels.get(value["value_uri"])
+
+
+async def list_allowed_values(allowed_values_uri: str, resolve_titles: bool = False) -> list[dict]:
     """GET an oslc:allowedValues resource and extract its values.
 
     Two formats: oslc:allowedValue rdf:resource (URI only), or
     rdf:Description with rdf:about + dcterms:title (URI + label).
     Returns [{"value_uri", "title"}] (title None when absent).
+    With ``resolve_titles`` a value without title on this server under /oslc/enumerations/ gets its label
+    from the enumeration document (read once per enumeration, cached; unreadable -> title stays None).
     """
+    values = await _allowed_values(allowed_values_uri)
+    if resolve_titles:
+        await _fill_enumeration_titles(values)
+    return values
+
+
+async def _allowed_values(allowed_values_uri: str) -> list[dict]:
     xml_text = await _cached_xml_text(allowed_values_uri)
     titles: dict[str, str | None] = {}
     # rdf:Description blocks with rdf:about carry a title.
@@ -2115,7 +2180,7 @@ async def list_fields(domain: str, project: str, type: str) -> dict:
     for p in props:
         allowed_values: list[dict] = []
         if p["allowed_values_uri"]:
-            allowed_values = await list_allowed_values(p["allowed_values_uri"])
+            allowed_values = await list_allowed_values(p["allowed_values_uri"], resolve_titles=True)
         field = {
             "name": p["name"],
             "title": p["title"],
@@ -2698,12 +2763,17 @@ def _compact(uri: str, prefixes: dict) -> str | None:
 
 
 def _match_literal(value: str, allowed: list[dict]) -> dict | None:
+    """The allowed value for a URI, id or label; None when nothing matches, ValueError when a label is ambiguous."""
     wanted = value.strip()
     for a in allowed:
         if a["value_uri"] == wanted or _last_segment(a["value_uri"]) == wanted:
             return a
-    lowered = wanted.lower()
-    return next((a for a in allowed if (a["title"] or "").strip().lower() == lowered), None)
+    folded = wanted.casefold()
+    found = [a for a in allowed if a["title"] is not None and a["title"].strip().casefold() == folded]
+    if len(found) > 1:
+        ids = [_last_segment(a["value_uri"]) for a in found]
+        raise ValueError(f"Label '{value}' is ambiguous ({len(found)} values share it): use one of the ids {ids}.")
+    return found[0] if found else None
 
 
 _FIELD_QNAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*:[\w.-]+$")
@@ -2814,7 +2884,7 @@ async def set_field(id: str, field: str, value: str) -> dict:
     if not prop["allowed_values_uri"]:
         written = _convert_to_range(key, value, prop["range_uri"])
     else:
-        allowed = await list_allowed_values(prop["allowed_values_uri"])
+        allowed = await list_allowed_values(prop["allowed_values_uri"], resolve_titles=True)
         literal = _match_literal(value, allowed)
         if literal is None:
             titles = [a["title"] or _last_segment(a["value_uri"]) for a in allowed]
