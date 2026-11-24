@@ -35,11 +35,13 @@ ETM answers **only RDF/XML** (JSON is refused with 406). The tools handle that; 
    `TestSuiteExecutionRecord`, `TestResult`, `TestSuiteResult`, `TestData`, `Keyword`, `TestEnvironment`,
    `BuildRecord`, `BuildDefinition`. Returns `{"items", "truncated", "total"}`; default 50, maximum 1000.
 3. `get_qm_resource(uri)` -> normalized properties plus `links` grouped by kind: `validates_requirement`,
-   `tests_change_request`, `uses_test_script`, `runs_test_case`, `executes_test_script`, `test_results`.
+   `tests_change_request`, `uses_test_script`, `runs_test_case`, `executes_test_script`, `test_results`,
+   `reports_on_test_case`, `produced_by_execution_record`.
 4. `get_test_coverage(project)` -> per test case, the requirements it validates and the work items it
    tests: `{"items": [{uri, title, short_id, requirements, work_items}], "truncated"}`.
-5. `get_test_results(project, test_case=None)` -> `{uri, title, verdict, verdict_name, points:
-   {passed, failed, blocked}, execution_record, test_case}`. `verdict` is the URI of the verdict
+5. `get_test_results(project, test_case=None)` -> `{"items": [...], "truncated"}`; each item is `{uri,
+   title, verdict, verdict_name, points: {passed, failed, blocked}, execution_record, test_case}`.
+   `verdict` is the URI of the verdict
    resource and `verdict_name` its readable end (`inconclusive`, ...). Pass a TestCase URI to filter.
 
 ## Write (by title and description only)
@@ -61,8 +63,9 @@ ETM answers **only RDF/XML** (JSON is refused with 406). The tools handle that; 
 ## Notes / Gotchas
 
 - **Refused types:** `TestExecutionRecord`, `TestResult`, native script steps (`TestScriptStep`) and every
-  type not listed above cannot be created, updated or deleted through these tools (deferred). Reading
-  them works.
+  type not listed above cannot be created or updated through these tools (deferred). Reading them works.
+  **`delete_qm_resource` does not filter by type**: it deletes any ETM resource whose URI you give it,
+  including results and execution records, so check the URI (`get_qm_resource`) before calling it.
 - **Writes are only title and description.** The ETM may require other data for some types; if the server
   refuses a creation, its message is shown unchanged.
 - **Live acceptance is pending.** The writes are covered by tests against mocks; a real `TestCase` creation

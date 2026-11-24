@@ -103,9 +103,9 @@ inspect_workitem(id="100200")
 
 ## Notes / Gotchas
 
-- **`list_fields` takes a title, `create_requirement(type=...)` takes a URI.** Do not confuse
-  them: `type` in `list_fields` is a shape *title* (case-insensitive), while the `type` of
-  `create_requirement` is the `instanceShape` *URI* (the `shape_uri` from `list_types`).
+- **`type` in `list_fields` and in `create_requirement`.** `list_fields` takes a shape *title*
+  (case-insensitive). `create_requirement(type=...)` takes the shape's `shape_uri` **or** its title, both
+  from `list_types(domain="rm", project=...)`; an unknown value is refused listing the valid types.
 - **RM vs CCM discovery differ.** RM (DOORS Next) uses OSLC 1.0 catalog shapes, CCM (RTC/EWM)
   uses OSLC 2.0; the tools abstract this but the shapes returned look different per domain.
 - **Enumerations:** when `list_fields` reports `allowed_values` for a field, you must use one
@@ -130,11 +130,13 @@ inspect_workitem(id="100200")
   (or `ELM_CA_BUNDLE=system` for the OS trust store). `ELM_VERIFY_TLS=false` (also `0`, `no`, `off`) turns
   verification off and logs one warning; it wins over `ELM_CA_BUNDLE`. Use it only as a last resort.
 - **Password.** `ELM_PASSWORD` is used exactly as typed. To pass it base64-encoded write `b64:<base64>`
-  (`b64:b64:x` means the literal text `b64:x`). `~/.elm_creds.json` is written by `elm-mcp login`; a
-  plaintext password in that file is an error: run `elm-mcp login` again.
+  (`b64:b64:x` means the literal text `b64:x`). `~/.elm_creds.json` must be written by `elm-mcp login` (the
+  password in it is always base64); a hand-written plaintext password usually fails with an error, so run
+  `elm-mcp login` again instead of editing the file.
 - **Errors start with the gate that probably blocked the call:** `credencial` (401 at login: check user and
   password), `sessao` (session expired, retry), `regra-de-processo` (403 with a server message: a process
   rule refused the write; the message is passed on unchanged), `permissao` (403 without message: role,
   license or visibility), `recurso-inexistente-ou-invisivel` (404), `conflito` (412: the resource changed,
-  re-read and retry), `formato` (406). Credentials and cookies never appear in the message.
+  re-read and retry), `formato` (406); any other status is reported as `[http-<status>]` with the server
+  message, if any. Credentials and cookies never appear in the message.
 - **Only URLs on the configured `ELM_URL` are followed**; a link or redirect to another host is refused.

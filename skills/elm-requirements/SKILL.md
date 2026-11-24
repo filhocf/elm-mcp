@@ -38,8 +38,8 @@ Neither is hardcoded — you discover them first. See the
 
 1. **Search.** `search_requirements(project, query=None, limit=None)` runs an OSLC query over the RM
    project (in the project's configuration/stream). Omit `query` to list; pass an OSLC query to filter
-   (see `docs/USAGE.md`). It returns `{"items": [...], "truncated": bool, "total", "configuration"}`;
-   `truncated=true` means there are more items than `limit`.
+   (see `docs/USAGE.md`). It returns `{"items": [...], "truncated": bool}` plus `total` and `configuration` (the stream used)
+   when the server reports them; `truncated=true` means there are more items than `limit`.
 2. **Read one.** `get_requirement(uri)` fetches a single requirement by its OSLC URI (the
    URI comes from a search result or is already known).
 
@@ -64,8 +64,9 @@ Neither is hardcoded — you discover them first. See the
    - `xhtml`: only validated and wrapped — it does **not** remove active content, so use it only for
      content you already trust.
    The ALM accepts neither Markdown nor plain text on its own: send one of the three formats above.
-   Comments (`<!--`), CDATA and processing instructions are refused, and so is content above
-   `ELM_RM_MAX_CONTENT_BYTES` (default 1 MB).
+   In `html` and `xhtml`, comments (`<!--`), CDATA and processing instructions are refused (Markdown
+   escapes them instead). Content above `ELM_RM_MAX_CONTENT_BYTES` (default 1 MB) is refused in every
+   format.
 6. **Duplicates.** Before creating, the tool looks for a requirement of the same type, title and
    folder. `if_exists="error"` (default) refuses and names the existing one, `"return"` hands it back
    with `created: false`, `"create"` creates anyway. Without `folder` any folder matches (pass

@@ -64,7 +64,7 @@ fills the fields the server actually requires — nothing is hardcoded per proje
 
 ## Write (ETM / QM test resources)
 
-Limitation: live acceptance of these writes is pending (writing to the reference ALM is suspended); they are verified against mocks only. Only the title and description are written; the ETM may require data outside OSLC for other types. These types are DEFERRED and refused: `TestExecutionRecord`, `TestResult`, native script steps (`TestScriptStep`) and every type not listed below. `TestCase` creation was verified in a real write (16/nov); `TestPlan`, `TestSuite` and `TestScript` follow the same factory pattern and are to be confirmed.
+Limitation: live acceptance of these writes is pending (writing to the reference ALM is suspended); they are verified against mocks only. Only the title and description are written; the ETM may require data outside OSLC for other types. These types are DEFERRED and refused by create and update: `TestExecutionRecord`, `TestResult`, native script steps (`TestScriptStep`) and every type not listed below (`delete_qm_resource` does not filter by type). `TestCase` creation was verified in a real write (16/nov); `TestPlan`, `TestSuite` and `TestScript` follow the same factory pattern and are to be confirmed.
 
 | Tool | Signature | Description |
 |------|-----------|-------------|

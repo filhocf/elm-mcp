@@ -41,16 +41,20 @@ tested) and `get_qm_resource(uri)` (its `links`). See the **`elm-qm`** skill.
 
 ## Rules every link tool follows
 
-- **URIs, same server only.** Targets are full resource URIs on the configured `ELM_URL`; another host,
-  a query string, a fragment, `%` or `..` is refused before any request.
+- **Inputs.** `link_workitems`/`unlink_workitems` take work item **ids**. `link_artifacts` and
+  `link_test_case` take full resource **URIs** on the configured `ELM_URL`; another host is refused before
+  any request. `link_test_case` also refuses a target with a query string, fragment, `%` or `..`, and
+  accepts only a plain QM resource path.
 - **The source must be the right kind.** `link_artifacts` needs a CCM work item URI as `source_uri`;
   `link_test_case` needs a TestCase URI. Source and target must differ.
 - **Idempotent.** Linking something already linked returns `changed: false` and writes nothing.
   Unlinking a target that is not linked is an error and writes nothing.
 - **Other links are preserved.** The PUT resends the links that were already there; only the one you
   asked for is added or removed. Concurrent edits give a `[conflito]` (412): re-read and retry.
-- **Confirmation.** If the confirming re-read fails or disagrees, the error says the PUT SUCCEEDED and the
-  resource WAS changed: check it before retrying.
+- **Confirmation.** Every tool re-reads after the PUT. If the re-read disagrees: `link_test_case` /
+  `unlink_test_case` say the PUT SUCCEEDED and the test case WAS changed; `link_workitems` and
+  `link_artifacts` say the server accepted the write but the re-read does not show it, and do not retry.
+  In every case read the resource before trying again.
 - Removal is symmetric: use the `unlink_*` tool with the same arguments.
 
 ## Gotchas

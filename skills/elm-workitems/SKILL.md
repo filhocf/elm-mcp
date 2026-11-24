@@ -50,8 +50,8 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    angle bracket, backslash or non-printable character is refused. It follows the server's
    pages until `limit` items (default 50, max 1000; `limit` must be positive) and returns
    `{"items": [{id, title, type, status, owner}], "truncated": bool}`; `truncated=true` means
-   there are more items. `search_requirements` and `search_testcases` return the same shape
-   (up to 1000 items), and `get_plan_items` adds a `truncated` key.
+   there are more items. `search_requirements` and `search_testcases` use the same `{"items", "truncated"}` envelope
+   (up to 1000 items; their items have their own fields), and `get_plan_items` adds a `truncated` key.
 2. **Read one.** `get_workitem(id)` fetches a single work item by ID.
 3. **Hierarchy view.** `get_plan_items(project, plan=None, item_ids=None)` returns backlog
    items with their child tasks expanded in one call. Select by `plan` (iteration-title
@@ -68,12 +68,13 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    parent_id=None, owner=None, filed_against=None, custom_fields=None, if_exists="error")`.
    `type` is any work item type of the project (id, title or alias from `list_types`; an ambiguous
    one is refused listing the ids).
-   - **Category is never chosen for you.** If `filed_against` is omitted it is not sent and the server
-     applies its own default (often "Unassigned"). If the server refuses the creation, the error carries
-     its message and a `list_fields` hint; pass `filed_against` explicitly (a category URI from
-     `list_fields` or `inspect_workitem`). The iteration is auto-discovered.
+   - **The tool never picks a category.** If `filed_against` is omitted it is not sent and the server
+     applies its own default (often "Unassigned"), unless the local profile has a default for it
+     (`defaults.<type id>`). If the server refuses the creation, the error carries its message, with a
+     `list_fields` hint when the refusal concerns the category; pass `filed_against` explicitly (a
+     category URI from `list_fields` or `inspect_workitem`). The iteration is auto-discovered.
    - **Required fields.** Missing required fields are filled from the local profile
-     (`defaults.<type id>`; your explicit arguments and `custom_fields` win); any the shape still
+     (`defaults.<type id>`; your explicit arguments win); any the shape still
      requires are refused, listed, **before** any write.
    - **Duplicates.** Before the POST the tool looks for a work item of the same type, normalized title
      and parent. `if_exists="error"` (default) refuses and names the existing one, `"return"` returns
@@ -108,8 +109,9 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
   saves one attachment to a **local** file (it never writes to the ALM) and is therefore **not** read
   only: ask before running it. With `ELM_DOWNLOAD_DIR` set, `dest` must be inside it.
 - **Logging hours and uploading attachments are not available** (they need an internal, unsupported
-  service). Do not try to emulate them with `update_workitem(timeSpent=...)`: that changes only the
-  aggregate total, not the time sheet.
+  service). Do not try to emulate them by writing `rtc_cm:timeSpent` through
+  `update_workitem(custom_fields=...)`: per `docs/specs/SPEC-ccm-interno.md` the time sheet is written
+  only by an internal service, and `timeSpent` is just the total.
 
 ### Update & transition
 
@@ -136,7 +138,7 @@ get_plan_items(project="MY PROJECT (KEY)", plan="Sprint 12")
 
 # Iterations (use a URI as planned_for)
 list_iterations(project="MY PROJECT (KEY)")
-# -> [{"title": "Sprint 12", "start": "...", "end": "...",
+# -> [{"title": "Sprint 12", "identifier": "...", "start_date": "...", "end_date": "...",
 #      "uri": "https://elm.company.com/ccm/oslc/iterations/_ITERATION_OID"}, ...]
 
 # --- Create ---
@@ -193,7 +195,8 @@ transition_workitem(id="100300", action="start")  # only if a unique action id c
 - `list_iterations` fetches details per iteration and can be slow on projects with many.
 - **`list_workitems(include_hidden=False)`** leaves out the states the local profile lists in
   `hidden_states` (never when you filter by `state`); with no profile nothing is hidden.
-- **`transition_workitem`** accepts the profile's `action_aliases` before trying the id, suffix or
-  substring rules.
+- **`transition_workitem`** resolves `action` as a real workflow action first (id, id suffix or unique
+  substring); only if that fails does it try the profile's `action_aliases`, so an alias never hides a
+  real action.
 - Links to requirements and test artifacts (`link_artifacts`), and test cases (`elm-qm`), are covered
   by the **`elm-traceability`** and **`elm-qm`** skills.
