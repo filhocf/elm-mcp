@@ -143,7 +143,10 @@ update_workitem(id="629772", custom_fields={"rtc_cm:someField": "value"})
 |----------|--------|
 | `ELM_CA_BUNDLE` | Path to a CA bundle (PEM) used to verify the server certificate, or `system` for the OS trust store. A missing file is an error naming `ELM_CA_BUNDLE`. |
 | `ELM_VERIFY_TLS` | `false`, `0`, `no` or `off` (any case) disables verification and wins over `ELM_CA_BUNDLE`. One warning is logged per process. Default: verification on. |
-| `ELM_PASSWORD` | Used as is. Prefix with `b64:` to pass it base64-encoded (UTF-8). `~/.elm_creds.json` always stores the password in base64. |
+| `ELM_PASSWORD` | Used as is. Prefix with `b64:` to pass it base64-encoded (UTF-8; surrounding whitespace after the prefix is ignored). `b64:b64:x` is the literal text `b64:x`. `b64:` followed by invalid base64 fails at authentication, naming `ELM_PASSWORD`. An empty password is sent as is and refused by the server. |
+| `~/.elm_creds.json` | Written by `elm-mcp login`; the `password` is always base64 of UTF-8. A plaintext or invalid `password` is an error at authentication (no fallback): run `elm-mcp login` again. |
+
+**Breaking (#70):** a base64 `ELM_PASSWORD` without the `b64:` prefix is now used as raw text (write `b64:<base64>`), and a plaintext `password` in `~/.elm_creds.json` is now an error (run `elm-mcp login`).
 
 ```bash
 export ELM_CA_BUNDLE=/etc/ssl/certs/company-ca.pem   # internal CA

@@ -8,7 +8,7 @@ import sys
 
 import httpx
 
-from .auth import _tls_verify
+from .tls import _tls_verify
 
 CRED_FILE = os.path.expanduser("~/.elm_creds.json")
 

@@ -10,7 +10,7 @@ from typing import ClassVar
 import certifi
 import pytest
 
-from elm_mcp import auth
+from elm_mcp import auth, tls
 
 
 class FakeClient:
@@ -56,7 +56,8 @@ async def test_ca_bundle_file_is_used(monkeypatch, tmp_path):
     monkeypatch.setenv("ELM_CA_BUNDLE", bundle)
     await auth.get_client()
     v = _verify()
-    assert v == bundle or isinstance(v, ssl.SSLContext)
+    assert isinstance(v, ssl.SSLContext)
+    assert v.verify_mode == ssl.CERT_REQUIRED
 
 
 async def test_ca_bundle_system_uses_os_context(monkeypatch):
@@ -65,6 +66,16 @@ async def test_ca_bundle_system_uses_os_context(monkeypatch):
     v = _verify()
     assert isinstance(v, ssl.SSLContext)
     assert v.verify_mode == ssl.CERT_REQUIRED
+
+
+async def test_ca_bundle_not_a_pem_is_clear_error(monkeypatch, tmp_path):
+    bad = tmp_path / "bad.pem"
+    bad.write_text("SECRET-CONTENT-NOT-A-CERT")
+    monkeypatch.setenv("ELM_CA_BUNDLE", str(bad))
+    with pytest.raises(ValueError, match="ELM_CA_BUNDLE") as info:
+        await auth.get_client()
+    assert "SECRET-CONTENT" not in str(info.value)
+    assert FakeClient.instances == []
 
 
 async def test_ca_bundle_missing_path_is_clear_error(monkeypatch, tmp_path):
@@ -104,11 +115,19 @@ async def test_verify_tls_true_keeps_verification(monkeypatch):
 
 
 async def test_verify_false_warns_in_a_log(monkeypatch, caplog):
-    monkeypatch.setenv("ELM_VERIFY_TLS", "false")
-    with caplog.at_level(logging.WARNING):
+    monkeypatch.setattr(tls, "_tls_warned", False)
+    monkeypatch.setenv("ELM_VERIFY_TLS", "OFF")
+    with caplog.at_level(logging.WARNING, logger="elm_mcp.tls"):
         await auth.get_client()
-    # may already have warned earlier in this process; the exact-once check is the subprocess test
-    assert _verify() is False
+        assert _verify() is False
+        auth._client = None
+        FakeClient.instances = []
+        await auth.get_client()
+        assert _verify() is False
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING and "DISABLED" in r.getMessage()]
+    assert len(warns) == 1
+    assert "ELM_VERIFY_TLS is set to a false value" in warns[0].getMessage()
+    assert "OFF" not in warns[0].getMessage()  # the raw value is not echoed
 
 
 def test_verify_false_warns_exactly_once_per_process():
@@ -123,7 +142,7 @@ def test_verify_false_warns_exactly_once_per_process():
         class H(logging.Handler):
             def emit(self, r): records.append(r)
         logging.getLogger().addHandler(H()); logging.getLogger().setLevel(logging.DEBUG)
-        from elm_mcp import auth
+        from elm_mcp import auth, tls
         class C:
             def __init__(self, **kw): self.kw = kw
             async def aclose(self): pass

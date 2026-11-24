@@ -11,6 +11,7 @@ src/elm_mcp/
 ├── __init__.py       # Package version
 ├── cli.py            # CLI: 'login' (credential setup) or 'serve' (MCP stdio)
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
+├── tls.py            # TLS verify setting from env (no config import; safe at import time)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
 ├── hours.py          # Time sheet reading: list_time, get_hours (ms -> h, 8 concurrent reads)
@@ -38,7 +39,7 @@ Client → FastMCP (stdio) → server.py → oslc.py → auth.py (cookies) → E
 
 ## Key Conventions
 
-- **Config**: env vars `ELM_URL`, `ELM_USER`, `ELM_PASSWORD` or `~/.elm_creds.json` (password always base64 in the file; `ELM_PASSWORD` as is, `b64:` prefix to decode)
+- **Config**: env vars `ELM_URL`, `ELM_USER`, `ELM_PASSWORD` or `~/.elm_creds.json` (password always base64 in the file, plaintext is an error raised at authentication; `ELM_PASSWORD` as is, `b64:` prefix to decode, `b64:b64:` escapes it)
 - **Auth**: Jazz form-based (`/jts/j_security_check`). Failure detected via `X-com-ibm-team-repository-web-auth-msg` header
 - **SSL**: verified by default; `ELM_CA_BUNDLE` (file or `system`), `ELM_VERIFY_TLS=false` opt-out (one warning per process)
 - **Naming**: snake_case functions, PascalCase classes

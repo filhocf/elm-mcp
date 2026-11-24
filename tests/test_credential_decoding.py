@@ -3,6 +3,10 @@
 import base64
 import importlib.util
 import json
+import subprocess
+import sys
+import textwrap
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -100,3 +104,69 @@ def test_creds_file_password_with_control_char_is_decoded(home):
     # isprintable() is False for a tab: the heuristic would hand back the raw base64 text
     (home / ".elm_creds.json").write_text(json.dumps({"url": URL, "username": "jdoe", "password": _b64("a\tb")}))
     assert Settings().elm_password == "a\tb"
+
+
+def test_env_b64_prefix_tolerates_trailing_newline(home, monkeypatch):
+    assert _env(monkeypatch, "b64:YWJjZDEyMzQ=\n").elm_password == "abcd1234"
+
+
+def test_env_b64_escape_is_the_literal_text(home, monkeypatch):
+    s = _env(monkeypatch, "b64:b64:x")
+    assert s.elm_password == "b64:x"
+    assert s.credentials_error == ""
+
+
+def test_env_b64_invalid_base64_is_a_clear_error_at_login_time(home, monkeypatch):
+    s = _env(monkeypatch, "b64:not base64!")
+    assert "ELM_PASSWORD" in s.credentials_error
+    assert s.elm_password == ""
+
+
+def test_env_b64_empty_is_an_empty_password_without_error(home, monkeypatch):
+    # nothing else checks for it: the server refuses the empty password at authentication
+    s = _env(monkeypatch, "b64:")
+    assert (s.elm_password, s.credentials_error) == ("", "")
+
+
+def test_creds_file_empty_password_is_empty_without_error(home):
+    (home / ".elm_creds.json").write_text(json.dumps({"url": URL, "username": "jdoe", "password": ""}))
+    s = Settings()
+    assert (s.elm_password, s.credentials_error) == ("", "")
+
+
+def test_creds_file_plaintext_password_is_an_error_without_fallback(home):
+    (home / ".elm_creds.json").write_text(json.dumps({"url": URL, "username": "jdoe", "password": "plain!"}))
+    s = Settings()
+    assert s.elm_password == ""
+    assert "Invalid 'password' in ~/.elm_creds.json" in s.credentials_error
+    assert "elm-mcp login" in s.credentials_error
+
+
+async def test_authenticate_raises_the_credentials_error(monkeypatch):
+    from elm_mcp import auth
+
+    stub = SimpleNamespace(credentials_error="Invalid 'password' in ~/.elm_creds.json. Run 'elm-mcp login' again.")
+    monkeypatch.setattr(auth, "settings", stub)
+    with pytest.raises(RuntimeError, match=r"\[credencial\].*elm-mcp login"):
+        await auth._authenticate(httpx.AsyncClient())
+
+
+def test_invalid_creds_file_does_not_break_import_nor_login(tmp_path):
+    (tmp_path / ".elm_creds.json").write_text(json.dumps({"url": URL, "username": "jdoe", "password": "plain!"}))
+    code = textwrap.dedent(
+        """
+        import elm_mcp.cli as cli
+        from elm_mcp.config import settings
+        assert callable(cli.login)
+        assert "elm-mcp login" in settings.credentials_error
+        print("OK")
+        """
+    )
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    import os
+
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path, check=False
+    )
+    assert "OK" in out.stdout, out.stdout + out.stderr
