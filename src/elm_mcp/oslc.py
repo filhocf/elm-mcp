@@ -6,7 +6,7 @@ import logging
 import math
 import os
 import re as _re
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -770,6 +770,8 @@ async def _find_current_iteration(project_url: str) -> str | None:
 
 def _payload_to_rdfxml(payload: dict) -> str:
     """Convert a payload dict to RDF/XML format for OSLC resource creation."""
+    from xml.sax.saxutils import quoteattr
+
     # Namespace prefixes used in payloads
     ns_map = {
         "dcterms": "http://purl.org/dc/terms/",
@@ -783,11 +785,11 @@ def _payload_to_rdfxml(payload: dict) -> str:
     elements = []
     for key, value in payload.items():
         if isinstance(value, dict) and "rdf:resource" in value:
-            elements.append(f'  <{key} rdf:resource="{value["rdf:resource"]}"/>')
+            elements.append(f"  <{key} rdf:resource={quoteattr(str(value['rdf:resource']))}/>")
         elif isinstance(value, list):
             for item in value:
                 if isinstance(item, dict) and "rdf:resource" in item:
-                    elements.append(f'  <{key} rdf:resource="{item["rdf:resource"]}"/>')
+                    elements.append(f"  <{key} rdf:resource={quoteattr(str(item['rdf:resource']))}/>")
         else:
             from xml.sax.saxutils import escape
 
@@ -2226,6 +2228,93 @@ async def list_folders(project: str) -> list[dict]:
         sub = props.get(_NAV_SUBFOLDERS, [])
         folders.append({"title": title, "uri": folder_uri, "subfolders_query": sub[0].get("value") if sub else None})
     return folders
+
+
+# ---------------------------------------------------------------------------------------------
+# list_teams (SPEC-ccm-times): team areas of a CCM project area from the Process REST
+# ---------------------------------------------------------------------------------------------
+_PROCESS_NS = "http://jazz.net/xmlns/prod/jazz/process/0.6/"
+_TEAM_URL_PATH_RE = _re.compile(r"^/ccm/process/project-areas/[^/]+/team-areas/([^/?#]+)$")
+_SAFE_ID_RE = _re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _is_safe_id(value: str) -> bool:
+    """A path-segment id that is safe in a URI and in an XML attribute: ``[A-Za-z0-9_.-]+``, not ``.``/``..``."""
+    return _SAFE_ID_RE.fullmatch(value) is not None and value not in (".", "..")
+
+
+def _server_origin() -> str:
+    parsed = urlparse(settings.elm_url)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _parse_team_areas(xml_text: str) -> list[dict]:
+    """Parse a Process REST ``team-areas`` document into [{name, id, uri, process_uri, archived}].
+
+    DTD/entity declarations and malformed XML raise ValueError. Blocks without a name, without a URL, with a
+    URL on another origin or not shaped ``.../team-areas/{id}`` are dropped. The URIs are built on the
+    configured origin from the id; nothing taken from the response is requested.
+    """
+    if "<!doctype" in xml_text.lower() or "<!entity" in xml_text.lower():
+        raise ValueError("invalid team-areas response: DTD/entity declarations are not accepted")
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise ValueError(f"invalid team-areas response: not well-formed XML ({exc})") from exc
+    if root.tag != f"{{{_PROCESS_NS}}}team-areas":
+        raise ValueError("invalid team-areas response: the root element is not jp06:team-areas")
+    origin = _server_origin()
+    teams: list[dict] = []
+    for block in root.findall(f"{{{_PROCESS_NS}}}team-area"):
+        name = (block.get(f"{{{_PROCESS_NS}}}name") or "").strip()
+        url = (block.findtext(f"{{{_PROCESS_NS}}}url") or "").strip()
+        if not name or not url:
+            continue
+        try:
+            assert_same_origin(url)
+        except ValueError:
+            continue
+        match = _TEAM_URL_PATH_RE.match(urlparse(url).path)
+        if match is None:
+            continue
+        team_id = match.group(1)
+        if not _is_safe_id(team_id):
+            continue
+        archived = (block.findtext(f"{{{_PROCESS_NS}}}archived") or "").strip().lower() == "true"
+        teams.append(
+            {
+                "name": name,
+                "id": team_id,
+                "uri": f"{origin}/ccm/oslc/teamareas/{team_id}",
+                "process_uri": f"{origin}/ccm/process/team-areas/{team_id}",
+                "archived": archived,
+            }
+        )
+    return teams
+
+
+async def list_teams(project: str, include_archived: bool = False, refresh: bool = False) -> dict:
+    """List the team areas of a CCM project area with ONE Process REST call (cached, see elm_mcp.cache).
+
+    The project area id comes from the service provider URL (``/contexts/{id}``), never from the title.
+    Returns {"items": [{name, id, uri, process_uri, archived}], "total"} sorted by name (casefold);
+    archived teams only with ``include_archived``.
+    """
+
+    async def load(pa_id: str) -> list[dict]:
+        client = await get_client()
+        url = f"{_server_origin()}/ccm/process/project-areas/{quote(pa_id, safe='')}/team-areas"
+        resp = await fetch(client, "GET", url, "list_teams", headers={"Accept": "text/xml"})
+        return _parse_team_areas(resp.text)
+
+    with cache.refresh_scope(refresh):
+        project_url = await _resolve_project_url("ccm", project)
+        pa_id = _project_area_id(project_url)
+        if "/contexts/" not in project_url or not _is_safe_id(pa_id):
+            raise ValueError(f"cannot extract the project area id from {project_url}")
+        teams = await cache.get_or_fetch(pa_id, "teams", lambda: load(pa_id))
+    items = sorted((t for t in teams if include_archived or not t["archived"]), key=lambda t: t["name"].casefold())
+    return {"items": items, "total": len(items)}
 
 
 # =====================================================================

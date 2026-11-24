@@ -19,7 +19,7 @@ src/elm_mcp/
 ├── qm.py             # ETM (QM) reading: capability by resourceType, RDF/XML pages, coverage, results
 ├── markdown_xhtml.py # Markdown subset to XHTML for the RM primaryText (own converter, all text escaped, http/https/mailto only)
 ├── qm_write.py       # ETM (QM) writing: create by title, update/link by byte edits of the re-read RDF/XML, delete
-└── server.py         # MCP server with 40 tools (21 read-only, 19 write)
+└── server.py         # MCP server with 41 tools (22 read-only, 19 write)
 
 tests/
 ├── test_auth.py      # Auth flow mocking
