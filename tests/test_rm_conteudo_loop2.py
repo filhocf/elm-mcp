@@ -291,3 +291,19 @@ def test_replace_primary_text_handles_an_empty_self_closing_literal():
     assert out.count("<jazz_rm:primaryText") == 1
     assert out.endswith("</jazz_rm:primaryText><x:y/>")
     assert "new" in out
+
+
+def test_drop_control_keeps_tab_lf_cr_and_removes_xml_illegal_characters():
+    from elm_mcp.markdown_xhtml import _drop_control
+
+    assert _drop_control("a\tb\nc\rd") == "a\tb\nc\rd"
+    assert _drop_control("a\x00b\x08c\x0bd\x0ce\x0ef\x1fg") == "abcdefg"
+    assert _drop_control("a\ufffeb\uffffc\ud800d\udfffe") == "abcde"
+    assert _drop_control("café ✓ ü") == "café ✓ ü"
+
+
+def test_drop_astral_removes_code_points_above_ffff_and_lone_surrogates():
+    from elm_mcp.oslc import _drop_astral
+
+    assert _drop_astral("a\U0001f600b\U0010ffffc\ud800d") == "abcd"
+    assert _drop_astral("café ✓") == "café ✓"

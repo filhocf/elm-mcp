@@ -1234,11 +1234,15 @@ def _sanitize_pass(html: str) -> str:
     content = _re.sub(r"[\u2600-\u27BF]", "", content)
     content = _re.sub(r"[\U0001FA00-\U0001FA6F]", "", content)
     content = _re.sub(r"[\U0001F300-\U0001F5FF]", "", content)
-    content = _ASTRAL.sub("", content)
+    content = _drop_astral(content)
     return _unwrap_root_div(content.strip())
 
 
-_ASTRAL = _re.compile("[\U00010000-\U0010ffff\ud800-\udfff]")
+def _drop_astral(text: str) -> str:
+    """Remove characters above U+FFFF (emoji and other astral code points) and lone surrogates; they break the ALM XML."""
+    return "".join(ch for ch in text if not (ord(ch) > 0xFFFF or 0xD800 <= ord(ch) <= 0xDFFF))
+
+
 _ROOT_OPEN = _re.compile(rf"""<div\s+xmlns=(?:"{_re.escape(_XHTML_NS)}"|'{_re.escape(_XHTML_NS)}')\s*>""")
 _DIV_CLOSE = _re.compile(r"</div\s*>", _re.IGNORECASE)
 _DIV_OPEN = _re.compile(r"<(/?)div\b", _re.IGNORECASE)
@@ -1339,9 +1343,9 @@ def prepare_content(content: str, content_format: str = "html") -> str:
     if content_format == "html":
         clean = sanitize_html_to_xhtml(content)
     elif content_format == "markdown":
-        clean = _unwrap_root_div(_ASTRAL.sub("", markdown_to_xhtml(content or "")).strip())
+        clean = _unwrap_root_div(_drop_astral(markdown_to_xhtml(content or "")).strip())
     else:
-        clean = _unwrap_root_div(_ASTRAL.sub("", content or "").strip())
+        clean = _unwrap_root_div(_drop_astral(content or "").strip())
     if content_format != "markdown":
         _reject_markup_literals(clean)
     _assert_xhtml_wellformed(clean)

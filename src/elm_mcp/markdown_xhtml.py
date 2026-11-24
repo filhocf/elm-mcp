@@ -7,7 +7,16 @@ passes) and only http/https/mailto URLs become links or images, so the output is
 
 import re
 
-_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
+
+def _drop_control(text: str) -> str:
+    """Remove the characters XML 1.0 cannot carry: C0 controls (except tab, LF, CR), U+FFFE/U+FFFF, lone surrogates."""
+    return "".join(
+        ch
+        for ch in text
+        if not ((ord(ch) < 0x20 and ch not in "\t\n\r") or ord(ch) in (0xFFFE, 0xFFFF) or 0xD800 <= ord(ch) <= 0xDFFF)
+    )
+
+
 _SAFE_URL = re.compile(r"^(https?://|mailto:)\S+$", re.IGNORECASE)
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE = re.compile(r"^\s*```")
@@ -150,7 +159,7 @@ def _heading_text(rest: str) -> str:
 
 def markdown_to_xhtml(text: str) -> str:
     """Convert the supported Markdown subset to well-formed XHTML; all text is escaped, raw HTML never passes."""
-    lines = _CONTROL.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = _drop_control(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     blocks: list[str] = []
     paragraph: list[str] = []
 
