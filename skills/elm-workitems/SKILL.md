@@ -2,8 +2,8 @@
 name: elm-workitems
 description: Search, read, create, update, transition and organize work items in an IBM ELM CCM (RTC / EWM) project area through elm-mcp, including parent/child hierarchy, iterations and workflow state changes. Use when managing tasks/stories, building a backlog hierarchy, assigning owners, planning into iterations, or moving items through their workflow.
 metadata:
-  version: "0.1.0"
-  keywords: "workitem, work item, ccm, rtc, ewm, task, story, backlog, iteration, plannedfor, transition, state, parent, child, hierarchy, owner, custom fields, elm"
+  version: "0.2.0"
+  keywords: "workitem, work item, ccm, rtc, ewm, task, story, backlog, iteration, plannedfor, transition, state, parent, child, hierarchy, owner, custom fields, comment, link, hours, timesheet, attachment, duplicate, if_exists, profile, elm"
 ---
 
 # ELM Work Items — CCM / RTC / EWM
@@ -16,7 +16,9 @@ iterations, set custom fields, and move them through their workflow. Covers:
 `list_workitems`, `get_workitem`, `create_workitem`, `update_workitem`,
 `add_child_workitem`, `transition_workitem`, `list_iterations`, `get_plan_items`,
 `inspect_workitem`, and the collaboration tools `add_comment`, `list_comments`,
-`link_workitems`, `unlink_workitems`, `set_field`, `list_workflow`.
+`link_workitems`, `unlink_workitems`, `set_field`, `list_workflow`, and the read-only hours and
+attachment tools `list_time`, `get_hours`, `list_attachments`, `download_attachment`.
+Links from a work item to requirements and test artifacts are in the **`elm-traceability`** skill.
 
 Category, iteration and custom `rtc_ext:*` attributes vary per project area and are **not**
 hardcoded — discover them first with the **`elm-discovery`** skill.
@@ -63,10 +65,20 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    for the shape and required fields; `inspect_workitem(id)` to copy concrete values
    (category, iteration, custom attributes) from a real item.
 6. **Create.** `create_workitem(project, title, type="task", description=None,
-   parent_id=None, owner=None, filed_against=None, custom_fields=None)`.
+   parent_id=None, owner=None, filed_against=None, custom_fields=None, if_exists="error")`.
    `type` is any work item type of the project (id, title or alias from `list_types`; an ambiguous
-   one is refused listing the ids). Category and iteration are auto-discovered when
-   omitted; pass `filed_against` / `custom_fields` explicitly for project-specific values.
+   one is refused listing the ids).
+   - **Category is never chosen for you.** If `filed_against` is omitted it is not sent and the server
+     applies its own default (often "Unassigned"). If the server refuses the creation, the error carries
+     its message and a `list_fields` hint; pass `filed_against` explicitly (a category URI from
+     `list_fields` or `inspect_workitem`). The iteration is auto-discovered.
+   - **Required fields.** Missing required fields are filled from the local profile
+     (`defaults.<type id>`; your explicit arguments and `custom_fields` win); any the shape still
+     requires are refused, listed, **before** any write.
+   - **Duplicates.** Before the POST the tool looks for a work item of the same type, normalized title
+     and parent. `if_exists="error"` (default) refuses and names the existing one, `"return"` returns
+     it with `created: false`, `"create"` creates anyway. After a 400/409 the check runs again before
+     the single resend, and a timeout never resends the POST.
    Pass `parent_id` to create it already linked under a parent.
 7. **Child item.** `add_child_workitem(parent_id, title, type="task", description=None,
    owner=None, project=...)` creates a work item linked as a child of `parent_id` — use this
@@ -77,12 +89,27 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
 - `list_comments(id)` -> `[{"id", "author", "created", "text"}]`; `add_comment(id, text)` sends
   the text HTML-escaped (line breaks as `<br/>`), POSTs once (never resent) and confirms the new
   comment by its id.
-- `link_workitems(source, target, link_type)` / `unlink_workitems(...)`: `link_type` is `parent`,
-  `blocks`, `depends_on`, `related`, `duplicate_of` or `resolves`; an item cannot be linked to itself.
+- `link_workitems(source, target, link_type)` / `unlink_workitems(...)`: work item to work item;
+  `link_type` is `parent` (replaces the current parent), `blocks`, `depends_on`, `related`,
+  `duplicate_of` or `resolves`; an item cannot be linked to itself. Confirmed by re-reading.
 - `set_field(id, field, value)`: `field` is `prefix:name` (or a shape property name); it must be in
   the item's shape and not read-only (otherwise use `list_fields`); the value is converted to the
   field's range (integer, boolean, decimal) and an enumerated field takes the literal title or id.
-- `list_workflow(project, type)`: states (`id`, `title`, `group`) and action ids for `transition_workitem`.
+- `list_workflow(project, type, refresh=False)`: states (`id`, `title`, `group`) and action ids for
+  `transition_workitem`.
+
+### Hours and attachments (read only)
+
+- `list_time(id)` -> entries of the item's time sheet (`person`, `date`, `hours`, `time_code`) and
+  `total_hours`. `get_hours(item_ids=None, plan=None, project=None, group_by="person"|"item",
+  max_entries=500)` sums hours for items and their direct children; above `max_entries` it returns a
+  partial result (`partial`, `unread_entries`) instead of failing.
+- `list_attachments(id)` -> metadata only. `download_attachment(id, attachment, dest, overwrite=False)`
+  saves one attachment to a **local** file (it never writes to the ALM) and is therefore **not** read
+  only: ask before running it. With `ELM_DOWNLOAD_DIR` set, `dest` must be inside it.
+- **Logging hours and uploading attachments are not available** (they need an internal, unsupported
+  service). Do not try to emulate them with `update_workitem(timeSpent=...)`: that changes only the
+  aggregate total, not the time sheet.
 
 ### Update & transition
 
@@ -155,8 +182,8 @@ transition_workitem(id="100300", action="start")  # only if a unique action id c
   (or id suffix) of a workflow action; do not try to set state via `update_workitem`.
   The valid actions depend on the item's workflow and current state; a call with an
   unknown action returns the list of action ids.
-- **Auto-discovery.** Category auto-discovery picks the project's first category — pass
-  `filed_against` when there is more than one. Current-iteration auto-discovery prefers bounded
+- **Auto-discovery.** The category is **not** auto-discovered (see Create): pass `filed_against`
+  when the server's default is not what you want. Current-iteration auto-discovery prefers bounded
   iterations (with an end date) — pass `planned_for` if your sprint is not picked up.
 - **`custom_fields` are project-specific.** Discover the exact attribute URIs and allowed
   values with `list_fields` / `inspect_workitem` (see `elm-discovery`) — never hardcode the
@@ -164,5 +191,9 @@ transition_workitem(id="100300", action="start")  # only if a unique action id c
 - **Updates are partial and ETag-based.** Pass only the fields you want to change; the ETag is
   handled for you.
 - `list_iterations` fetches details per iteration and can be slow on projects with many.
-- Cross-domain OSLC links (Implements Requirement / Tested By / Affects) are planned, not yet
-  available; QM (ETM) is read-only today.
+- **`list_workitems(include_hidden=False)`** leaves out the states the local profile lists in
+  `hidden_states` (never when you filter by `state`); with no profile nothing is hidden.
+- **`transition_workitem`** accepts the profile's `action_aliases` before trying the id, suffix or
+  substring rules.
+- Links to requirements and test artifacts (`link_artifacts`), and test cases (`elm-qm`), are covered
+  by the **`elm-traceability`** and **`elm-qm`** skills.

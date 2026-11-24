@@ -2,8 +2,8 @@
 name: elm-discovery
 description: Discover a project area's shapes, required fields, folders and concrete field values from the elm-mcp server BEFORE creating or updating anything. Use this first whenever you are about to write a requirement or a work item, or when you need to know what types/fields/enumerations a project area expects.
 metadata:
-  version: "0.1.0"
-  keywords: "discover, discovery, shape, shapes, fields, required, types, folders, inspect, metadata, oslc, elm, doors, rtc, ewm, etm"
+  version: "0.2.0"
+  keywords: "discover, discovery, shape, shapes, fields, required, types, folders, inspect, metadata, oslc, elm, doors, rtc, ewm, etm, cache, refresh, profile, tls, credentials, errors"
 ---
 
 # ELM Discovery — know the shape before you write
@@ -32,7 +32,8 @@ It is the prerequisite for the `elm-requirements` and `elm-workitems` skills.
 
 - The `elm-mcp` MCP server is registered with your agent (typically run via `uvx elm-mcp`).
 - Credentials are configured, either interactively with `elm-mcp login` or via environment
-  variables `ELM_URL`, `ELM_USER`, `ELM_PASSWORD`.
+  variables `ELM_URL`, `ELM_USER`, `ELM_PASSWORD` (see "Setup and errors" below: TLS is verified
+  by default and `ELM_PASSWORD` is used as is).
 - You know (or can list) the project area you are targeting. Domains are:
   `rm` = requirements (DOORS Next), `ccm` = work items (RTC/EWM), `qm` = test cases (ETM).
 
@@ -43,8 +44,8 @@ See `docs/TOOLS.md` and `docs/USAGE.md` for full signatures and query syntax.
 The core pattern is **list_types → list_fields**, with `list_folders` for RM and
 `inspect_workitem` to learn concrete values from a real item.
 
-1. **Find the project area.** Use `list_projects(domain=...)` to get the project names
-   (service providers) available for the domain you want.
+1. **Find the project area.** Use `list_projects(domain)` (`domain` is required: `rm`, `ccm`
+   or `qm`); it returns `[{"title", "url"}]`. Pass the `title` as `project` to every other tool.
 2. **List the resource types (shapes).** `list_types(domain, project)` returns
    `[{"title", "shape_uri", "resource_type"}]`. For `ccm` each item is a work item type
    creation factory with extra `id`, `factory_title` and `factory_uri` (the `id` is the type id).
@@ -68,7 +69,7 @@ The core pattern is **list_types → list_fields**, with `list_folders` for RM a
 ```python
 # 1. Which project areas exist for work items?
 list_projects(domain="ccm")
-# -> ["MY PROJECT (KEY)", "ANOTHER PROJECT (KEY2)", ...]
+# -> [{"title": "MY PROJECT (KEY)", "url": "https://elm.company.com/ccm/oslc/contexts/_PA_OID/workitems/services.xml"}, ...]
 
 # 2. What resource types (shapes) does this project area define?
 list_types(domain="ccm", project="MY PROJECT (KEY)")
@@ -112,4 +113,28 @@ inspect_workitem(id="100200")
 - **`inspect_workitem` is CCM-only** and is the fastest way to discover custom `rtc_ext:*`
   attribute URIs that no catalog lists plainly.
 - **`list_folders` is RM-only.** It filters out system folders (root, query results).
-- QM (ETM) is read-only today — use `search_testcases` (one item per test case) and `list_qm_resources`; no writes.
+- **Cache.** Discovery (provider, factories, shapes, allowed values, workflow, RM stream) is cached in
+  memory per server and project area for `ELM_CACHE_TTL` seconds (default 300; `0` turns it off).
+  `list_types`, `list_fields` and `list_workflow` take `refresh=True` to reload it: use it right after an
+  administrator changed the process or when a value you know exists is "not allowed".
+- **Local profile.** `elm-mcp profile draft <project>` prints a JSON draft (required fields per type with
+  `null` to fill, allowed values under `_review`) built only from this read-only discovery. A reviewed
+  profile in `ELM_MCP_PROFILE_DIR` (default `~/.elm-mcp/profiles/`) supplies defaults, action aliases and
+  hidden states; the package itself carries no organization data.
+- **ETM (QM)** also has discovery-style reads (`list_qm_resources`, `search_testcases`) and, since v0.6, writes
+  by title: see the **`elm-qm`** skill. Links between artifacts: **`elm-traceability`**.
+
+## Setup and errors
+
+- **TLS is verified by default.** For a server with an internal CA set `ELM_CA_BUNDLE=/path/to/ca.pem`
+  (or `ELM_CA_BUNDLE=system` for the OS trust store). `ELM_VERIFY_TLS=false` (also `0`, `no`, `off`) turns
+  verification off and logs one warning; it wins over `ELM_CA_BUNDLE`. Use it only as a last resort.
+- **Password.** `ELM_PASSWORD` is used exactly as typed. To pass it base64-encoded write `b64:<base64>`
+  (`b64:b64:x` means the literal text `b64:x`). `~/.elm_creds.json` is written by `elm-mcp login`; a
+  plaintext password in that file is an error: run `elm-mcp login` again.
+- **Errors start with the gate that probably blocked the call:** `credencial` (401 at login: check user and
+  password), `sessao` (session expired, retry), `regra-de-processo` (403 with a server message: a process
+  rule refused the write; the message is passed on unchanged), `permissao` (403 without message: role,
+  license or visibility), `recurso-inexistente-ou-invisivel` (404), `conflito` (412: the resource changed,
+  re-read and retry), `formato` (406). Credentials and cookies never appear in the message.
+- **Only URLs on the configured `ELM_URL` are followed**; a link or redirect to another host is refused.

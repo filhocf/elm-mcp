@@ -108,8 +108,9 @@ the `Authorization` header never appear in the message.
   types work without code changes (`docs/specs/SPEC-wi-custom-types.md`).
 - `custom_fields` injects project-specific RDF attributes; values are discovered per project area
   (via the discovery tools), not hardcoded.
-- QM (ETM) is read-only through these tools; test-case write and cross-domain OSLC links
-  (Implements Requirement / Tested By / Affects) are planned (`docs/specs/`, `docs/roadmap.md`).
+- QM (ETM) reads and the title/description writes are in the tables above; cross-domain links are
+  `link_artifacts` (from a work item) and `link_test_case` (from a test case). See the `elm-qm` and
+  `elm-traceability` skills.
 - State changes go through `transition_workitem` (workflow action), not `update_workitem`.
 
 - **Same origin only.** URLs followed from server responses (next pages, workflow states, comment and iteration
