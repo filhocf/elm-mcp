@@ -70,7 +70,9 @@ Neither is hardcoded — you discover them first. See the
    folder. `if_exists="error"` (default) refuses and names the existing one, `"return"` hands it back
    with `created: false`, `"create"` creates anyway. Without `folder` any folder matches (pass
    `folder`, or use `"return"`/`"create"`). A timeout after the POST re-queries; it never resends.
-7. **Large content.** If the server answers 403 to a large creation POST (over
+7. **Large content.** (A third party reported a 403 on large creation POSTs; on 24 Nov 2026 an 8.4 KB HTML POST
+   was created directly with 201 in the reference project, so this fallback has never fired live.)
+   If the server answers 403 to a large creation POST (over
    `ELM_RM_CREATE_FALLBACK_BYTES`, default 4096), the tool creates the requirement without text and
    applies the content by PUT. Check `content_applied` in the result: when it is `false` the
    requirement exists (see `uri`) but the text was **not** applied — fix it with `update_requirement`,

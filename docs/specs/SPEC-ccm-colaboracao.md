@@ -1,6 +1,6 @@
 # SPEC — Colaboração CCM: comentários, links, campos e consultas
 
-**Status:** G4 GREEN (respx, W2) — aceitação viva pendente · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
+**Status:** G4 GREEN (respx, W2); aceitação viva PARCIAL feita em 24/nov/2026 (ver 'Resultado da aceitação viva') · **Release:** v0.6.0 · **Guarda-chuva:** `SPEC-ewm-delta` F3 · **Depende de:** `SPEC-ccm-correcoes`
 
 ## Tools novas ou ampliadas
 | Tool | Como (verificado no servidor de referência) |
@@ -21,6 +21,11 @@
 
 ## Aceitação viva
 Em itens descartáveis: comentar e reler; criar e remover `depends_on` e `related`; re-parent; gravar pontos por título ("5 pts").
+
+### Resultado da aceitação viva (24/nov/2026, servidor de referência, itens descartáveis, todos cancelados)
+- **Confirmado:** `add_comment` + `list_comments` (o comentário volta com `id`, `author`, `created`, `text`); `link_workitems` e `unlink_workitems` com `related` e `depends_on` (vincular, repetir devolve `changed: false`, desvincular, desvincular de novo é erro); `set_field` de campo enumerado por id (`complexity` = `5`, valor gravado como `{"rdf:resource": ...}`); criação de tarefa com `parent_id` (o IB lista a filha em `children`); `list_workitems(type=...)`.
+- **Achado:** `list_comments` devolve o texto como o servidor guarda, escapado em HTML (`&lt;b&gt;`): issue #81.
+- **NÃO exercitado ao vivo:** re-parent (`parent`), `blocks`, `duplicate_of`, `resolves`, pontos por título (`5 pts`), filtro `planned_for`.
 
 ## Gates
 G3 (respx: 405 na 2.0, 201 na 1.0, preservação de links) → G4 → G5 → aceitação viva.

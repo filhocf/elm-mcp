@@ -1,6 +1,6 @@
 # SPEC — CCM: listar times (Team Areas) de uma project area
 
-**Status:** IMPLEMENTADA (G4, aguarda G5 e aceitação viva) (G0 FEITO em leitura viva, 24/nov/2026) · **Release:** v0.7.0 · **Origem da ideia:** tool `listar_times` do cadu-ia (só a necessidade; a implementação é nossa, ADR-006)
+**Status:** IMPLEMENTADA (G4, G5 feito); aceitação viva feita em 24/nov/2026: leitura (10 times no projeto de referência, o time de um item real está na lista com o mesmo URI) e ESCRITA de `rtc_cm:teamArea` por `custom_fields` em `create_workitem` (IB e tarefa); `set_field` não serve para esse campo (G0 FEITO em leitura viva, 24/nov/2026) · **Release:** v0.7.0 · **Origem da ideia:** tool `listar_times` do cadu-ia (só a necessidade; a implementação é nossa, ADR-006)
 
 ## Contexto
 Criar work item exige `team_area`/`filed_against` válidos por project area. Hoje o usuário descobre o time por `inspect_workitem` de um item existente ou por `list_fields`. Falta uma forma direta de listar os times ativos.

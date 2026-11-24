@@ -1,6 +1,6 @@
 # SPEC — Links OSLC cross-domínio (rastreabilidade)
 
-**Status:** DONE parcial (G4 GREEN; escrita de link a confirmar na aceitação viva) · G0 feito (shape lido ao vivo 23/nov) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5
+**Status:** DONE (G4 GREEN); escrita de link validada ao vivo em 24/nov/2026 para `implementsRequirement`, `affectsRequirement` e `testedByTestCase`; os outros 10 tipos NÃO foram exercitados · G0 feito (shape lido ao vivo 23/nov) · **Release:** v0.6.0 · **RFC-mãe:** RFC-001 §5
 **Pesquisa:** `pesquisa-apis-elm.md §1/§3` · `levantamento-interno-alm.md §C.8/C.9/C.10`
 **Classe:** entregável de produto — fecha a matriz AC→código→teste→ALM (fase ⑨ do DAIA)
 
@@ -25,8 +25,7 @@ cross-domínio: `implementsRequirement`, `tracksRequirement`, `affectsRequiremen
 
 **Escopo da W3:** `link_artifacts` com a ORIGEM sendo um work item (CCM) e o destino em RM ou QM, escrevendo `oslc_cm:<tipo>` por PUT
 parcial. Escrever links a partir do QM (`oslc_qm:validatesRequirement`, `oslc_qm:testsChangeRequest`) depende de escrita no QM e fica
-na `SPEC-qm-write` (W6). A escrita ainda NÃO foi verificada ao vivo (escrita no ALM de referência está suspensa): o formato do PUT é
-o mesmo de `link_workitems` e fica marcado "a confirmar na aceitação viva".
+na `SPEC-qm-write` (W6). A escrita foi verificada ao vivo em 24/nov/2026 (itens descartáveis): `link_artifacts`/`unlink_artifacts` com `implementsRequirement` (work item → requisito RM), `affectsRequirement` e `testedByTestCase` (work item → caso de teste ETM) vincularam, repetir devolveu `changed: false`, desvincularam e a releitura confirmou. O formato do PUT é o mesmo de `link_workitems`. Os demais 10 tipos da lista seguem sem verificação ao vivo.
 
 ## Critério de aceite (EARS)
 
