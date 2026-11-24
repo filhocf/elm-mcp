@@ -76,6 +76,10 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Changed
 
+- **BREAKING (#70):** password decoding no longer guesses.
+  - `ELM_PASSWORD` is now used as raw text. If yours was base64 without a prefix, write it as `ELM_PASSWORD=b64:<base64>` (the part after `b64:` is stripped of surrounding whitespace). To use a password that literally starts with `b64:`, write `b64:b64:...` (`b64:b64:x` is the text `b64:x`). `b64:` followed by invalid base64 fails at authentication with a clear error naming `ELM_PASSWORD`.
+  - A `password` in `~/.elm_creds.json` that is plain text (not base64 of UTF-8) is now an error, with no fallback: the file is only written by `elm-mcp login`, always in base64. Run `elm-mcp login` again. The error is raised when the server tries to authenticate; `import elm_mcp` and `elm-mcp login` still work with an invalid file.
+- **BREAKING (#71):** TLS certificate verification is now ON by default (it was always off). For a server with an internal CA, set `ELM_CA_BUNDLE=/path/to/ca.pem` (or `ELM_CA_BUNDLE=system` for the OS trust store); a missing file is a `ValueError` naming `ELM_CA_BUNDLE`. To keep the old behavior, set `ELM_VERIFY_TLS=false` (also `0`, `no`, `off`; it wins over `ELM_CA_BUNDLE` and logs one warning per process). `elm-mcp login` follows the same settings.
 - `search_requirements` now returns interpreted items (`uri`, `title`, `identifier`, `type`, `modified`, `folder`) instead of the raw RDF/JSON dictionary: a deliberate change of return.
 - RM queries discover the project's stream and send `Configuration-Context`, `oslc.prefix` (dcterms, oslc, rdf, nav, jazz_rm) and `oslc.select`; a project without a stream is queried without the header.
 - `if_exists` defaults to `error`: creating a requirement or work item whose title, type and folder or parent already exist is now refused. Pass `if_exists="create"` for the old behavior (deliberate incompatible change).
@@ -109,6 +113,7 @@ CCM collaboration (SPEC-ccm-colaboracao, wave W2):
 
 ### Fixed
 
+- Password decoding no longer corrupts passwords (#70): the `password` in `~/.elm_creds.json` is always decoded as base64 and UTF-8, and `ELM_PASSWORD` is used as is, so a plaintext password that looks like base64, or one with non-ASCII or control characters, comes out intact.
 - `search_requirements` no longer answers 400 (`Undefined namespace prefix` / null configuration) on RM queries with `oslc.where`.
 - `search_requirements` returns one item per requirement instead of one giant raw dictionary, and takes the total from "Query Results: N".
 

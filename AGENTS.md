@@ -11,6 +11,7 @@ src/elm_mcp/
 ├── __init__.py       # Package version
 ├── cli.py            # CLI: 'login' (credential setup) or 'serve' (MCP stdio)
 ├── config.py         # Settings via pydantic-settings (env vars + ~/.elm_creds.json fallback)
+├── tls.py            # TLS verify setting from env (no config import; safe at import time)
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
 ├── hours.py          # Time sheet reading: list_time, get_hours (ms -> h, 8 concurrent reads)
@@ -38,9 +39,9 @@ Client → FastMCP (stdio) → server.py → oslc.py → auth.py (cookies) → E
 
 ## Key Conventions
 
-- **Config**: env vars `ELM_URL`, `ELM_USER`, `ELM_PASSWORD` or `~/.elm_creds.json` (password base64-encoded)
+- **Config**: env vars `ELM_URL`, `ELM_USER`, `ELM_PASSWORD` or `~/.elm_creds.json` (password always base64 in the file, plaintext is an error raised at authentication; `ELM_PASSWORD` as is, `b64:` prefix to decode, `b64:b64:` escapes it)
 - **Auth**: Jazz form-based (`/jts/j_security_check`). Failure detected via `X-com-ibm-team-repository-web-auth-msg` header
-- **SSL**: `verify=False` (internal certificates)
+- **SSL**: verified by default; `ELM_CA_BUNDLE` (file or `system`), `ELM_VERIFY_TLS=false` opt-out (one warning per process)
 - **Naming**: snake_case functions, PascalCase classes
 - **Queries**: `oslc.query_resources(..., limit=None)` follows `oslc:nextPage` (default 50, cap 1000, dedup by `rdf:about`) and returns a list with a `truncated` attribute; `list_workitems` wraps it as `{"items", "truncated"}`.
 - **Discovery cache** (`cache.py`): `cache.get_or_fetch(project_area, resource, loader)` keyed by (`ELM_URL`, project area, resource); TTL from `ELM_CACHE_TTL` read per call (default 300, `0` off), clock `time.monotonic()`; failed loads are not stored; `cache.refresh_scope(refresh)` serves `refresh=True`; `cache.invalidate(pa)` on a 400/409 creation error (`oslc.WriteRejected`). Never cache credentials, cookies or query results. tests/conftest.py clears it per test.

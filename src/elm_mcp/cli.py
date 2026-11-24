@@ -8,6 +8,8 @@ import sys
 
 import httpx
 
+from .tls import _tls_verify
+
 CRED_FILE = os.path.expanduser("~/.elm_creds.json")
 
 
@@ -22,7 +24,7 @@ def login() -> None:
 
     print(f"\nTestando autenticação em {url}...")
     try:
-        client = httpx.Client(verify=False, timeout=30, follow_redirects=True)
+        client = httpx.Client(verify=_tls_verify(), timeout=30, follow_redirects=True)
         resp = client.post(
             f"{url}/jts/j_security_check",
             data={"j_username": username, "j_password": password},

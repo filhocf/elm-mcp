@@ -67,6 +67,11 @@ URLs of its responses). The client only follows URLs, and redirects, on that ori
 another host name (internal name, http vs https, different port) makes calls fail with "outside the configured
 ELM server". Redirects are checked before being followed, so a 302 to another host is refused.
 
+TLS certificates are verified. For a server with an internal CA, set `ELM_CA_BUNDLE` to the CA file (or `system` for the OS
+trust store); `ELM_VERIFY_TLS=false` turns verification off (not recommended; logs a warning). `ELM_PASSWORD` is used as is
+(`b64:<base64>` to pass it encoded; `b64:b64:x` is the literal text `b64:x`). **Breaking:** a base64 `ELM_PASSWORD` without the
+`b64:` prefix is no longer decoded, and a plaintext `password` in `~/.elm_creds.json` is an error: run `elm-mcp login` again.
+
 Optional settings: `ELM_MAX_DOWNLOAD_MB` (size cap of `download_attachment`, default 50), `ELM_DOWNLOAD_DIR` (root that confines its `dest`; the tool writes a local file, so it is not read only; 21 tools read only, 19 write; 40 in total), `ELM_DOWNLOAD_TIMEOUT` (its deadline in seconds, default 300), `ELM_CACHE_TTL` (seconds of the in-memory discovery cache, default 300, `0` turns it off) and
 `ELM_MCP_PROFILE_DIR` (directory of the local profile, default `~/.elm-mcp/profiles/`). To start a profile from the
 discovery of a project (read-only, JSON on stdout):
