@@ -12,7 +12,7 @@ from xml.sax.saxutils import escape as _xml_escape
 
 import httpx
 
-from . import cache, profile
+from . import cache, profile, xmlscan
 from .auth import _authenticate, get_client, session_state
 from .config import settings
 from .markdown_xhtml import markdown_to_xhtml
@@ -243,9 +243,29 @@ async def _cached_service_providers(domain: str) -> list[dict]:
     return await cache.get_or_fetch("", f"providers:{domain}", lambda: list_service_providers(domain))
 
 
+# RM catalog entry (Discovery 1.0): the head of a provider and the first services tag after it (xmlscan, linear).
+_SP_HEAD = _re.compile(r"<\w+:ServiceProvider>\s*<(?:\w+:)?title>([^<]+)</(?:\w+:)?title>\s*")
+_SP_SERVICES = _re.compile(r"<\w+:services(?=\s)")
+_RM_COMPONENT = _re.compile(r"<oslc_config:component(?=\s)")
+_RM_CONFIGURATIONS = _re.compile(r"<(?:\w+:)?configurations(?=\s)")
+_RM_MEMBER = _re.compile(r"<(?:\w+:)?member(?=\s)")
+
+
+def _rm_providers(xml_text: str) -> list[dict]:
+    """``[{"title", "url"}]`` of an RM catalog: each ServiceProvider title paired with the next services URL."""
+    providers: list[dict] = []
+    pos = 0
+    while (head := _SP_HEAD.search(xml_text, pos)) is not None:
+        found = next(xmlscan.attr_matches(xml_text, _SP_SERVICES, pos=head.end()), None)
+        if found is None:
+            break  # no services tag after this provider: none after a later one either
+        svc_url, _start, pos = found
+        providers.append({"title": head.group(1), "url": svc_url})
+    return providers
+
+
 async def list_service_providers(domain: str) -> list[dict]:
     """List all service providers (projects) for a domain (always read from the server)."""
-    import re
 
     client = await get_client()
     catalog_url = await get_catalog_url(domain)
@@ -261,16 +281,7 @@ async def list_service_providers(domain: str) -> list[dict]:
 
     # RM (Discovery 1.0): use regex directly — ET has issues in MCP stdio context
     if domain == "rm":
-        entries = re.findall(
-            r"<\w+:ServiceProvider>\s*"
-            r"<(?:\w+:)?title>([^<]+)</(?:\w+:)?title>\s*.*?"
-            r"<\w+:services\s+[^>]*rdf:resource=\"([^\"]+)\"",
-            xml_text,
-            re.DOTALL,
-        )
-        for title, svc_url in entries:
-            providers.append({"title": title, "url": svc_url})
-        return providers
+        return _rm_providers(xml_text)
 
     # CCM/QM: parse with ElementTree (OSLC Core namespace)
     catalog = ET.fromstring(xml_text)
@@ -442,20 +453,15 @@ async def _find_rm_configuration(project_url: str) -> str | None:
     """
 
     async def load() -> str | None:
-        component = _re.search(
-            r"<oslc_config:component\s[^>]*rdf:resource=\"([^\"]+)\"", await _fetch_service_xml(project_url)
-        )
+        component = xmlscan.first_attr(await _fetch_service_xml(project_url), _RM_COMPONENT)
         if component is None:
             return None
-        component_xml = await _get_xml_text(_html.unescape(component.group(1)))
-        configurations = _re.search(r"<(?:\w+:)?configurations\s[^>]*rdf:resource=\"([^\"]+)\"", component_xml)
+        component_xml = await _get_xml_text(_html.unescape(component))
+        configurations = xmlscan.first_attr(component_xml, _RM_CONFIGURATIONS)
         if configurations is None:
             return None
-        member = _re.search(
-            r"<(?:\w+:)?member\s[^>]*rdf:resource=\"([^\"]+)\"",
-            await _get_xml_text(_html.unescape(configurations.group(1))),
-        )
-        return _html.unescape(member.group(1)) if member else None
+        member = xmlscan.first_attr(await _get_xml_text(_html.unescape(configurations)), _RM_MEMBER)
+        return _html.unescape(member) if member else None
 
     return await cache.get_or_fetch(_project_area_id(project_url), f"rm-configuration:{project_url}", load)
 
@@ -1430,13 +1436,12 @@ async def _find_requirement_factory(project_url: str) -> str:
     # Match each CreationFactory block, then pick the one whose resourceType is
     # EXACTLY rm#Requirement — not a substring match, which would also accept
     # rm#RequirementCollection (DOORS Next exposes both). Mistake note ed14f77c.
-    for block in _re.findall(r"<\w*:?CreationFactory\b.*?</\w*:?CreationFactory>", xml_text, _re.DOTALL):
-        rt = _re.search(r"<\w*:?resourceType\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        if rt is None or rt.group(1) != _RM_REQUIREMENT_TYPE:
+    for block in xmlscan.blocks(xml_text, "CreationFactory"):
+        if xmlscan.first_attr(block, "resourceType") != _RM_REQUIREMENT_TYPE:
             continue
-        m = _re.search(r"<\w*:?creation\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        if m:
-            return m.group(1)
+        creation = xmlscan.first_attr(block, "creation")
+        if creation:
+            return creation
     raise ValueError(f"RM CreationFactory for Requirement not found in '{project_url}'")
 
 
@@ -1491,8 +1496,7 @@ def _extract_identifier(xml_text: str) -> str | None:
     """Pull dcterms:identifier out of an RM response body (regex)."""
     if not xml_text:
         return None
-    m = _re.search(r"<\w*:?identifier[^>]*>([^<]+)</\w*:?identifier>", xml_text)
-    return m.group(1) if m else None
+    return xmlscan.element_text(xml_text, "identifier")
 
 
 IF_EXISTS_MODES = ("error", "return", "create")
@@ -1804,14 +1808,14 @@ async def delete_requirement(uri: str) -> dict:
 def _replace_primary_text(body: str, primary_content: str) -> str:
     """Swap the content of jazz_rm:primaryText, ending at its LAST closing tag (a server-side comment inside the
     literal may hold a ``</jazz_rm:primaryText>`` of its own that a non-greedy match would stop at)."""
-    open_m = _re.search(r"<jazz_rm:primaryText[^>]*>", body)
-    if open_m is not None and open_m.group(0).endswith("/>"):  # an empty, self-closing literal
+    span = xmlscan.open_tag_span(body, "<jazz_rm:primaryText")
+    if span is not None and body[span[0] : span[1]].endswith("/>"):  # an empty, self-closing literal
         tag = f'<jazz_rm:primaryText rdf:parseType="Literal">{primary_content}</jazz_rm:primaryText>'
-        return body[: open_m.start()] + tag + body[open_m.end() :]
+        return body[: span[0]] + tag + body[span[1] :]
     close = body.rfind("</jazz_rm:primaryText>")
-    if open_m is None or close < open_m.end():
+    if span is None or close < span[1]:
         raise ValueError("could not locate the content of jazz_rm:primaryText in the requirement")
-    return body[: open_m.end()] + primary_content + body[close:]
+    return body[: span[1]] + primary_content + body[close:]
 
 
 async def update_requirement(
@@ -1825,6 +1829,8 @@ async def update_requirement(
     an ETag conflict (the @tool boundary converts it to a legible ToolError). ``xhtml`` is normalized per
     ``content_format`` (html | xhtml | markdown) BEFORE any request; a root div already in it is not doubled.
     """
+    if ">" in uri:
+        raise ValueError(f"URI inválido: contém > ({uri!r})")
     clean = prepare_content(xhtml, content_format) if xhtml is not None else None
     client = await get_client()
     get_resp = await fetch(
@@ -1842,28 +1848,25 @@ async def update_requirement(
     # Edit ONLY inside the target resource's <rdf:Description> block, not the
     # first/any match in the whole document (a GET may return several Descriptions
     # — linked resources, folders). Anchor on rdf:about matching the uri; fall
-    # back to the first Description if the server omits/abbreviates rdf:about.
-    desc_re = _re.compile(
-        r'(<\w*:?Description\b[^>]*rdf:about="' + _re.escape(uri) + r'"[^>]*>)(.*?)(</\w*:?Description>)',
-        _re.DOTALL,
-    )
-    m = desc_re.search(xml_content)
+    # back to the first Description ONLY when the document holds a single one (server omits/abbreviates
+    # rdf:about); with several Descriptions an unmatched about is an error, never a silent guess.
+    m = xmlscan.find_element(xml_content, "Description", about=uri)
     if m is None:
-        desc_re = _re.compile(r"(<\w*:?Description\b[^>]*>)(.*?)(</\w*:?Description>)", _re.DOTALL)
-        m = desc_re.search(xml_content)
+        first = xmlscan.find_element(xml_content, "Description")
+        if first is not None and xmlscan.find_element(xml_content[first.end :], "Description") is not None:
+            raise ValueError(
+                f"rdf:Description with rdf:about='{uri}' not found among several Descriptions; refusing to guess"
+            )
+        m = first
     if m is None:
         raise ValueError(f"could not locate the requirement's rdf:Description in '{uri}'")
 
-    open_tag, body, close_tag = m.group(1), m.group(2), m.group(3)
+    open_tag, body, close_tag = m.open_tag, m.body, m.close_tag
 
     if title is not None:
-        body = _re.sub(
-            r"(<\w*:?title[^>]*>)(.*?)(</\w*:?title>)",
-            lambda t: t.group(1) + _xml_escape(title) + t.group(3),
-            body,
-            count=1,
-            flags=_re.DOTALL,
-        )
+        t = xmlscan.find_element(body, "title", boundary=False)
+        if t is not None:
+            body = body[: t.start] + t.open_tag + _xml_escape(title) + t.close_tag + body[t.end :]
 
     if clean is not None:
         primary_content = f'<div xmlns="http://www.w3.org/1999/xhtml">{clean}</div>'
@@ -1873,7 +1876,7 @@ async def update_requirement(
             primary_tag = f'<jazz_rm:primaryText rdf:parseType="Literal">{primary_content}</jazz_rm:primaryText>'
             body = body + f"    {primary_tag}\n  "
 
-    xml_content = xml_content[: m.start()] + open_tag + body + close_tag + xml_content[m.end() :]
+    xml_content = xml_content[: m.start] + open_tag + body + close_tag + xml_content[m.end :]
 
     put_resp = await _request(
         client,
@@ -1936,9 +1939,8 @@ def _shape_title(xml_text: str) -> str | None:
     type's dcterms:title — RDF/XML serialization order is not guaranteed by the
     server, so the type title may appear after a property (G5 P2).
     """
-    stripped = _re.sub(r"<\w*:?property\b.*?</\w*:?property>", "", xml_text, flags=_re.DOTALL)
-    m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", stripped)
-    return m.group(1).strip() if m else None
+    title = xmlscan.element_text(xmlscan.remove_blocks(xml_text, "property"), "title")
+    return title.strip() if title is not None else None
 
 
 async def _get_xml_text(url: str, max_bytes: int | None = None) -> str:
@@ -2003,25 +2005,25 @@ async def _list_ccm_creation_factories(project_url: str) -> list[dict]:
     xml_text = await _fetch_service_xml(project_url)
     resource_type = QUERY_RESOURCE_TYPE["ccm"]
     factories: list[dict] = []
-    for block in _re.findall(r"<\w*:?CreationFactory\b.*?</\w*:?CreationFactory>", xml_text, _re.DOTALL):
-        rt = _re.search(r"<\w*:?resourceType\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        creation = _re.search(r"<\w*:?creation\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        if rt is None or rt.group(1) != resource_type or creation is None:
+    for block in xmlscan.blocks(xml_text, "CreationFactory"):
+        rt = xmlscan.first_attr(block, "resourceType")
+        creation = xmlscan.first_attr(block, "creation")
+        if rt != resource_type or creation is None:
             continue
-        type_m = _re.search(r"/workitems/([^/?#]+)/?$", creation.group(1))
+        type_m = _re.search(r"/workitems/([^/?#]+)/?$", creation)
         if type_m is None:
             continue
-        shape = _re.search(r"<\w*:?resourceShape\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        title_m = _re.search(r"<\w*:?title[^>]*>([^<]*)</\w*:?title>", block)
-        raw_title = _html.unescape(title_m.group(1)) if title_m else ""
+        shape = xmlscan.first_attr(block, "resourceShape")
+        title_text = xmlscan.element_text(block, "title", allow_empty=True)
+        raw_title = _html.unescape(title_text) if title_text is not None else ""
         named = _FACTORY_TITLE_RE.match(raw_title.strip())
         factories.append(
             {
                 "title": named.group(1) if named else raw_title.strip(),
                 "id": type_m.group(1),
                 "factory_title": raw_title,
-                "factory_uri": creation.group(1),
-                "shape_uri": shape.group(1) if shape else None,
+                "factory_uri": creation,
+                "shape_uri": shape,
                 "resource_type": resource_type,
             }
         )
@@ -2046,11 +2048,10 @@ async def list_resource_shapes(domain: str, project: str) -> list[dict]:
     resource_type = QUERY_RESOURCE_TYPE[domain]
 
     shapes: list[dict] = []
-    for block in _re.findall(r"<\w*:?CreationFactory\b.*?</\w*:?CreationFactory>", xml_text, _re.DOTALL):
-        rt = _re.search(r"<\w*:?resourceType\s+[^>]*rdf:resource=\"([^\"]+)\"", block)
-        if rt is None or rt.group(1) != resource_type:
+    for block in xmlscan.blocks(xml_text, "CreationFactory"):
+        if xmlscan.first_attr(block, "resourceType") != resource_type:
             continue
-        for sh in _re.findall(r"<\w*:?resourceShape\s+[^>]*rdf:resource=\"([^\"]+)\"", block):
+        for sh in xmlscan.all_attrs(block, "resourceShape"):
             shape_xml = await _cached_xml_text(sh)
             shapes.append(
                 {
@@ -2217,14 +2218,14 @@ async def _allowed_values(allowed_values_uri: str) -> list[dict]:
     xml_text = await _cached_xml_text(allowed_values_uri)
     titles: dict[str, str | None] = {}
     # rdf:Description blocks with rdf:about carry a title.
-    for block in _re.findall(r"<\w*:?Description\b[^>]*>.*?</\w*:?Description>", xml_text, _re.DOTALL):
+    for block in xmlscan.blocks(xml_text, "Description", tag_end=True):
         about_m = _re.search(r"rdf:about=\"([^\"]+)\"", block)
-        title_m = _re.search(r"<\w*:?title[^>]*>([^<]+)</\w*:?title>", block)
+        title_text = xmlscan.element_text(block, "title")
         if about_m:
-            titles[about_m.group(1)] = title_m.group(1).strip() if title_m else None
+            titles[about_m.group(1)] = title_text.strip() if title_text is not None else None
     # oslc:allowedValue rdf:resource lists the values (the real CCM container is itself a Description,
     # whose rdf:about is NOT a value).
-    refs = _re.findall(r"<\w*:?allowedValue\s+[^>]*rdf:resource=\"([^\"]+)\"", xml_text)
+    refs = xmlscan.all_attrs(xml_text, "allowedValue")
     if refs:
         return [{"value_uri": uri, "title": titles.get(uri)} for uri in refs]
     return [{"value_uri": uri, "title": title} for uri, title in titles.items()]
@@ -2338,13 +2339,12 @@ async def list_folders(project: str) -> list[dict]:
     """
     project_url = await _resolve_project_url("rm", project)
     sp_xml = await _get_xml_text(project_url)
-    area_m = _re.search(r"<\w*:?details\s+[^>]*rdf:resource=\"([^\"]+)\"", sp_xml)
-    if area_m is None:
+    project_area_uri = xmlscan.first_attr(sp_xml, "details")
+    if project_area_uri is None:
         raise ValueError(
             f"project area not advertised by the service provider ({project_url}): "
             "the folders cannot be queried (no oslc:details)."
         )
-    project_area_uri = area_m.group(1)
 
     client = await get_client()
     folders_url = f"{settings.elm_url}/rm/folders"
@@ -2600,7 +2600,7 @@ def _comment_html(text: str) -> str:
 def _plain(value: str | None) -> str:
     """Comparable plain text of a comment (markup stripped, entities decoded, whitespace collapsed)."""
     value = _re.sub(r"<br\s*/?>|</(?:div|p)>", " ", value or "", flags=_re.IGNORECASE)
-    value = _re.sub(r"<[^>]+>", "", value)
+    value = xmlscan.strip_tags(value)
     return " ".join(_html.unescape(value).split())
 
 

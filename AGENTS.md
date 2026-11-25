@@ -15,6 +15,7 @@ src/elm_mcp/
 ├── auth.py           # Jazz form-based auth, singleton httpx.AsyncClient with cookies
 ├── oslc.py           # OSLC service discovery + query (handles 3 different ELM API patterns)
 ├── hours.py          # Time sheet reading: list_time, get_hours (ms -> h, 8 concurrent reads)
+├── xmlscan.py        # Linear-time scanners for server XML (tags, attributes, blocks, strip tags); replaces the quadratic regexes (#88)
 ├── attachments.py    # Attachment metadata and local download (Accept */*, size cap, base name only)
 ├── qm.py             # ETM (QM) reading: capability by resourceType, RDF/XML pages, coverage, results
 ├── markdown_xhtml.py # Markdown subset to XHTML for the RM primaryText (own converter, all text escaped, http/https/mailto only)
