@@ -5,7 +5,7 @@ The shape declares ``oslc:propertyDefinition`` PERCENT-ENCODED
 encoded form, so set_field / create_workitem / update_workitem write the key
 ``rtc_ext:...classifica%C3%A7%C3%A3o`` and the server answers 409 "Unknown attribute". The server accepts
 the DECODED key (``rtc_ext:...classificação``). Target: the local name is percent-decoded ONCE, and only
-when the result is a plain name (unicode letters, digits, ``.``, ``_``, ``-``); anything else stays as it came.
+when the result is a plain name (unicode letters, ASCII digits, ``.``, ``_``, ``-``); anything else stays as it came.
 
 Groups:
   1  ``_compact`` / ``canonical_property_key`` decode the local name          (RED)
@@ -20,7 +20,6 @@ Behavior is observed through respx (query params, parsed JSON/XML bodies). Tenan
 """
 
 import json
-from contextlib import suppress
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -279,7 +278,7 @@ async def test_create_workitem_never_injects_an_element_or_attribute_from_an_uns
     Today the key goes to the body as is: ``%`` is not valid in an XML name, so the POST is malformed.
     """
     posts = _create_env(w2_router, required=False)
-    with suppress(ValueError, ToolError):
+    with pytest.raises((ValueError, ToolError), match="Invalid property name"):
         await _create(**{f"rtc_ext:{local}": "v"})
     for route in posts.values():
         for call in route.calls:
@@ -293,7 +292,7 @@ async def test_create_workitem_never_injects_an_element_or_attribute_from_an_uns
 async def test_set_field_never_writes_a_decoded_unsafe_key(w2_router, local):
     props = [_accent_prop(name="evil", propdef=RTC_EXT + local)]
     item = _field_item(w2_router, props)
-    with suppress(ValueError, ToolError):
+    with pytest.raises((ValueError, ToolError), match="Invalid property name"):
         await server.set_field("100", "evil", "v")
     for request in item.puts:
         keys = request.url.params.get("oslc.properties", "").split(",") + list(json.loads(request.content))
@@ -338,3 +337,74 @@ async def test_inspect_workitem_keeps_the_keys_as_the_server_sent_them():
     )
     result = await server.inspect_workitem("7")
     assert result["fields"] == {KEY_ENC: "a", KEY_DEC: "b"}
+
+
+# ======================================================================
+# 7. Review fixes: collisions, ambiguity, numeric characters, direct unit tests
+# ======================================================================
+DECODE_KEEPS = [
+    "x%2C",  # comma
+    "x%3B",  # semicolon
+    "x%2c",  # lowercase hex of a comma
+    "x%2e%2e",  # '..'
+    "x%00",  # NUL
+    "x%C3",  # truncated UTF-8
+    "x%25C3",  # double encoding
+    "x%E2%80%AE",  # RLO U+202E
+    "x%C2%B2",  # superscript two (category No)
+    "x%C2%BD",  # one half (category No)
+    "x%D9%A3",  # arabic-indic digit three
+    "x%20y",  # space
+    "x\u00b2",  # numeric already decoded: left as is (refused later by the key check)
+]
+
+
+@pytest.mark.parametrize("local", DECODE_KEEPS)
+def test_decode_local_name_keeps_what_is_not_a_plain_name(local):
+    assert oslc._decode_local_name(local) == local
+
+
+@pytest.mark.parametrize(
+    ("local", "expected"),
+    [("classifica%C3%A7%C3%A3o", "classificação"), ("a%2Eb", "a.b"), ("a%2D%5Fb", "a-_b"), ("n%C3%A91", "né1")],
+)
+def test_decode_local_name_decodes_plain_names(local, expected):
+    assert oslc._decode_local_name(local) == expected
+
+
+@pytest.mark.parametrize("local", DECODE_KEEPS + ["x\u202e", "x y", "x\u0663", "\u00bd", "1x", ""])
+def test_check_property_key_refuses_unsafe_names(local):
+    with pytest.raises(ValueError, match="Invalid property name"):
+        oslc._check_property_key(f"rtc_ext:{local}")
+
+
+@pytest.mark.parametrize("local", ["classificação", "_a", "a.b-c_d9", "é1", "日本語"])
+def test_check_property_key_accepts_plain_names(local):
+    assert oslc._check_property_key(f"rtc_ext:{local}") == f"rtc_ext:{local}"
+
+
+async def test_create_workitem_refuses_custom_fields_that_collapse_to_one_key(w2_router):
+    posts = _create_env(w2_router, required=False)
+    with pytest.raises((ValueError, ToolError), match="collide") as exc:
+        await _create(**{"rtc_ext:x\u00e7": "a", "rtc_ext:x%C3%A7": "b"})
+    assert "rtc_ext:x\u00e7" in str(exc.value) and "rtc_ext:x%C3%A7" in str(exc.value)
+    assert not [c for route in posts.values() for c in route.calls]
+
+
+async def test_update_workitem_refuses_custom_fields_that_collapse_to_one_key(w2_router):
+    item = _field_item(w2_router)
+    with pytest.raises((ValueError, ToolError), match="collide") as exc:
+        await server.update_workitem("100", custom_fields={"rtc_ext:x\u00e7": "a", "rtc_ext:x%C3%A7": "b"})
+    assert "rtc_ext:x\u00e7" in str(exc.value) and "rtc_ext:x%C3%A7" in str(exc.value)
+    assert item.puts == []
+
+
+async def test_set_field_refuses_a_shape_that_declares_the_encoded_and_decoded_form(w2_router):
+    props = [
+        _accent_prop(name="one", propdef=RTC_EXT + "x%C3%A7"),
+        _accent_prop(name="two", propdef=RTC_EXT + "x\u00e7"),
+    ]
+    item = _field_item(w2_router, props)
+    with pytest.raises((ValueError, ToolError), match="ambiguous"):
+        await server.set_field("100", "rtc_ext:x\u00e7", "v")
+    assert item.puts == []

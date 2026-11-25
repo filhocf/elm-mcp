@@ -655,7 +655,7 @@ async def _create_workitem_once(
         payload["rtc_cm:filedAgainst"] = {"rdf:resource": filed_against}
     # Inject custom fields (project-specific customizations); they win over the local profile
     if custom_fields:
-        payload.update({oslc.canonical_property_key(k): v for k, v in custom_fields.items()})
+        payload.update(oslc.normalize_custom_fields(custom_fields))
     for key, value in profile.type_defaults(profile.load(project_area_id), type_id).items():
         payload.setdefault(key, value)
     # Auto-discover current iteration
@@ -712,7 +712,7 @@ async def update_workitem(
     if planned_for is not None:
         payload["rtc_cm:plannedFor"] = {"rdf:resource": planned_for}
     if custom_fields:
-        payload.update({oslc.canonical_property_key(k): v for k, v in custom_fields.items()})
+        payload.update(oslc.normalize_custom_fields(custom_fields))
     if not payload:
         raise ToolError("At least one field must be provided")
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"

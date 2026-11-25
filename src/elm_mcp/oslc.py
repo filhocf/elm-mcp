@@ -2773,8 +2773,17 @@ def _expand(name: str, prefixes: dict) -> str | None:
     return f"{ns}{local}" if ns else None
 
 
-_PLAIN_LOCAL_RE = _re.compile(r"[\w.-]+")
-_PROPERTY_KEY_RE = _re.compile(r"[A-Za-z_][\w.-]*:[^\W\d][\w.-]*")
+_PROPERTY_PREFIX_RE = _re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
+
+def _is_plain_local_name(name: str) -> bool:
+    """A usable XML local name: first a unicode letter or ``_``; then unicode letters, ASCII digits, ``.``, ``_``, ``-``.
+
+    ``str.isalpha`` keeps out numeric characters (``²``, ``½``, ``٣``) that ``\\w`` accepts but XML names refuse.
+    """
+    if not name or not (name[0].isalpha() or name[0] == "_"):
+        return False
+    return all(ch.isalpha() or ch in "0123456789._-" for ch in name)
 
 
 def _decode_local_name(local: str) -> str:
@@ -2791,16 +2800,17 @@ def _decode_local_name(local: str) -> str:
         decoded = unquote(local, errors="strict")
     except UnicodeDecodeError:
         return local
-    if decoded == local or ".." in decoded or not _PLAIN_LOCAL_RE.fullmatch(decoded):
+    if decoded == local or ".." in decoded or not _is_plain_local_name(decoded):
         return local
     return decoded
 
 
 def _check_property_key(key: str) -> str:
     """The key itself when it is a prefixed name usable as an XML element and JSON key; ValueError otherwise."""
-    if not isinstance(key, str) or not _PROPERTY_KEY_RE.fullmatch(key):
+    prefix, sep, local = key.partition(":") if isinstance(key, str) else ("", "", "")
+    if not (sep and _PROPERTY_PREFIX_RE.fullmatch(prefix) and _is_plain_local_name(local)):
         raise ValueError(
-            f"Invalid property name {key!r}: use prefix:name with letters, digits, '.', '_' or '-' "
+            f"Invalid property name {key!r}: use prefix:name with letters, digits 0-9, '.', '_' or '-' "
             "(percent-encoded names are decoded only when the result is such a plain name)."
         )
     return key
@@ -2922,8 +2932,15 @@ async def set_field(id: str, field: str, value: str) -> dict:
     props = await list_shape_properties(shape)
     expanded = _expand(field, prefixes)
     prop = next((p for p in props if expanded and p["property_uri"] == expanded), None)
-    if prop is None and ":" in field:  # the shape declares the URI percent-encoded; compare the decoded key
-        prop = next((p for p in props if _compact(p["property_uri"] or "", prefixes) == field), None)
+    if ":" in field:  # the shape may declare the URI percent-encoded; compare the decoded key
+        matches = [p for p in props if _compact(p["property_uri"] or "", prefixes) == field]
+        if len({p["property_uri"] for p in matches} | ({expanded} if prop else set())) > 1:
+            raise ValueError(
+                f"Field '{field}' is ambiguous: the shape declares more than one property that decodes to it "
+                f"({sorted(p['name'] or p['property_uri'] for p in matches)})."
+            )
+        if prop is None and matches:
+            prop = matches[0]
     if prop is None:
         prop = next((p for p in props if p["name"] == field), None)
     if prop is None:
@@ -3219,6 +3236,22 @@ def canonical_property_key(key: str) -> str:
         return _compact(text, _CCM_PREFIXES) or key
     prefix, sep, local = text.partition(":")
     return f"{prefix}:{_decode_local_name(local)}" if sep else text
+
+
+def normalize_custom_fields(custom_fields: dict) -> dict:
+    """``custom_fields`` keyed by canonical property key; ValueError when two keys collapse to the same one."""
+    normalized: dict = {}
+    origins: dict[str, list[str]] = {}
+    for key, value in custom_fields.items():
+        canonical = canonical_property_key(key)
+        origins.setdefault(canonical, []).append(key)
+        normalized[canonical] = value
+    for canonical, keys in origins.items():
+        if len(keys) > 1:
+            raise ValueError(
+                f"custom_fields keys collide after normalization into '{canonical}': {keys}. Send each attribute once."
+            )
+    return normalized
 
 
 async def missing_required_fields(factory: dict, payload: dict) -> list[str] | None:
