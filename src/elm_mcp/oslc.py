@@ -57,7 +57,8 @@ QUERY_RESOURCE_TYPE = {
 
 
 # Bounded quantifiers: an unbounded [^>]* rescans to the end of the body from every "<message" (quadratic).
-_MESSAGE_XML = _re.compile(r"<\w{0,32}:?message\b[^>]{0,500}>([^<]+)</\w{0,32}:?message>")
+# 2000 keeps messages with long attribute lists readable (the old [^>]* read them) and stays linear.
+_MESSAGE_XML = _re.compile(r"<\w{0,32}:?message\b[^>]{0,2000}>([^<]+)</\w{0,32}:?message>")
 
 
 def _server_message(resp: httpx.Response) -> str | None:

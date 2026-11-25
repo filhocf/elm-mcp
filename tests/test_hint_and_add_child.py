@@ -374,6 +374,15 @@ def test_server_message_is_fast_on_hostile_xml(body):
     assert time.perf_counter() - start < 5
 
 
+def test_server_message_reads_xml_message_with_1500_chars_of_attributes():
+    from elm_mcp import oslc
+
+    attrs = 'a="' + "x" * 1494 + '"'
+    assert len(attrs) == 1498
+    resp = httpx.Response(403, text=f"<oslc:Error><oslc:message {attrs}>No way</oslc:message></oslc:Error>")
+    assert oslc._server_message(resp) == "No way"
+
+
 def test_server_message_still_reads_a_normal_xml_message():
     from elm_mcp import oslc
 
