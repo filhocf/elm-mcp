@@ -131,7 +131,7 @@ async def test_create_workitem_tool():
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(project="MY PROJECT (KEY)", title="New Task", type="task", if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
 
 
 @respx.mock
@@ -143,7 +143,7 @@ async def test_create_workitem_with_parent():
     result = await create_workitem(
         project="MY PROJECT (KEY)", title="Child Task", type="task", parent_id="10", if_exists="create"
     )
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
 
 
 @respx.mock
@@ -158,7 +158,7 @@ async def test_update_workitem_tool():
         ]
     )
     respx.put(uri).mock(return_value=httpx.Response(200, json={"rdf:about": uri}))
-    result = await update_workitem(id="42", title="New Title")
+    result = await update_workitem(id="42", title="New Title", verbose=True)
     assert result.get("dcterms:title") == "New Title"
 
 
@@ -169,7 +169,7 @@ async def test_add_child_workitem_tool():
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await add_child_workitem(parent_id="10", title="Sub-task", project="MY PROJECT (KEY)", if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
 
 
 async def test_add_child_workitem_requires_project():
@@ -377,7 +377,7 @@ async def test_create_workitem_with_custom_fields():
         custom_fields={"rtc_ext:com.company.team.workitem.attribute.categoriatarefa": "literal.l10"},
         if_exists="create",
     )
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     # Verify custom field is in the posted body
     posted_body = post_route.calls[0].request.content.decode()
     assert "categoriatarefa" in posted_body
@@ -398,7 +398,7 @@ async def test_create_workitem_without_custom_fields():
         type="task",
         if_exists="create",
     )
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     # No iterations available → no plannedFor in payload
     posted_body = post_route.calls[0].request.content.decode()
     assert "plannedFor" not in posted_body
@@ -425,7 +425,7 @@ async def test_golden_creation_url_is_the_type_factory_not_the_generic_one():
         return_value=httpx.Response(201, json=CREATED_WI)
     )
     result = await create_workitem(project="MY PROJECT (KEY)", title="Test", type="task", if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert post_route.call_count == 1
     assert generic_route.call_count == 0
 
@@ -552,7 +552,7 @@ async def test_update_workitem_owner():
         ]
     )
     put_route = respx.put(uri).mock(return_value=httpx.Response(200, json={"rdf:about": uri}))
-    result = await update_workitem(id="42", owner="jdoe")
+    result = await update_workitem(id="42", owner="jdoe", verbose=True)
     assert result.get("dcterms:contributor") == {"rdf:resource": f"{BASE}/jts/users/jdoe"}
     body = put_route.calls[0].request.content
     import json as _json

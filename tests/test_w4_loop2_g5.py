@@ -66,7 +66,7 @@ async def test_a_refusal_after_the_server_created_the_item_is_not_resent(w2_rout
     result = await server.create_workitem(project=PROJECT, title=TITLE, type="task", if_exists=if_exists)
     assert posts["task"].call_count == 1, "the POST was not resent"
     assert result["created"] is True
-    assert result["dcterms:identifier"] == "77"
+    assert result["id"] == "77"
     assert "NOT resent" in result["warning"]
 
 

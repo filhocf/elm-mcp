@@ -564,6 +564,7 @@ async def create_workitem(
     filed_against: str | None = None,
     custom_fields: dict | None = None,
     if_exists: str = "error",
+    verbose: bool = False,
 ) -> dict:
     """Create a work item in an RTC project via OSLC.
 
@@ -572,8 +573,11 @@ async def create_workitem(
     dropped); the returned titles are then compared ignoring case and repeated spaces, which only matters when
     the server returned them. Required fields the call leaves out are filled from the local profile
     (defaults of the type, see `elm-mcp profile draft`); any still missing are refused, listed.
-    Returns the created work item plus `created: true`; an existing one (if_exists="return") comes as
-    {"rdf:about", "dcterms:identifier", "dcterms:title", "created": false}.
+    Returns {"id", "uri", "title", "type", "state", "created"} (plus "warning" when the server answered the
+    request with an error but the item was found afterwards). `id` is dcterms:identifier, `uri` rdf:about,
+    `type` dcterms:type, `state` oslc_cm:status; a key the server did not give is None. With verbose=True the
+    whole work item as the server returned it, plus `created: true`. An existing item (if_exists="return")
+    comes from the duplicate check: `created` is false; `type` comes from the duplicate check and `state` from one tolerant extra read of the item (None if it fails).
 
     Args:
         project: Project name (e.g., "MY PROJECT (KEY)")
@@ -589,7 +593,30 @@ async def create_workitem(
             is refused (except "create"), also when the check was truncated (more than 1000 candidates). A timeout
             after the request was sent never resends it: the check runs again. After a 400/409 the check also runs
             again before the single resend, and a work item that appeared meanwhile is returned instead.
+        verbose: Return the whole work item (about 125 keys) instead of the short summary (default: False)
     """
+    result = await _create_workitem(
+        project, title, type, description, parent_id, owner, filed_against, custom_fields, if_exists
+    )
+    if verbose:
+        return result
+    summary = oslc.compact_workitem(result, "created")
+    if result.get("created") is False or "warning" in result:  # from the duplicate check: it has no state
+        await oslc.fill_compact(summary)
+    return summary
+
+
+async def _create_workitem(
+    project: str,
+    title: str,
+    type: str,
+    description: str | None,
+    parent_id: str | None,
+    owner: str | None,
+    filed_against: str | None,
+    custom_fields: dict | None,
+    if_exists: str,
+) -> dict:
     oslc.check_if_exists(if_exists)
     project_url = await oslc._resolve_project_url("ccm", project)
     try:
@@ -688,8 +715,12 @@ async def update_workitem(
     estimate_hours: float | None = None,
     planned_for: str | None = None,
     custom_fields: dict | None = None,
+    verbose: bool = False,
 ) -> dict:
     """Update fields of an existing work item via a partial OSLC PUT (only the given fields are sent).
+
+    Returns {"id", "uri", "title", "type", "state", "updated": true} read back after the PUT (a key the server
+    did not give is None); with verbose=True the whole re-read work item.
 
     Args:
         id: Work item ID (number)
@@ -699,6 +730,7 @@ async def update_workitem(
         estimate_hours: Estimate in hours (e.g., 8 = 8h)
         planned_for: Iteration URI (e.g., from get_workitem response)
         custom_fields: Dict of extra properties to send (each key is listed in oslc.properties)
+        verbose: Return the whole re-read work item instead of the short summary (default: False)
     """
     payload: dict = {}
     if title is not None:
@@ -716,7 +748,8 @@ async def update_workitem(
     if not payload:
         raise ToolError("At least one field must be provided")
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
-    return await oslc.update_resource(uri, payload)
+    item = await oslc.update_resource(uri, payload)
+    return item if verbose else oslc.compact_workitem({**item, "updated": True}, "updated")
 
 
 @tool
@@ -730,12 +763,14 @@ async def add_child_workitem(
     if_exists: str = "error",
     filed_against: str | None = None,
     custom_fields: dict | None = None,
+    verbose: bool = False,
 ) -> dict:
     """Create a child work item under a parent in an RTC project (same duplicate check as create_workitem).
 
     if_exists: "error" (default) refuses a work item of the same type, title and parent; "return" returns it
     with created=false; "create" creates anyway.
     filed_against, custom_fields: passed to create_workitem unchanged (same meaning, see there).
+    verbose: as in create_workitem. Returns the same short summary {"id", "uri", "title", "type", "state", "created"}.
     """
     return await create_workitem(
         project=project,
@@ -747,6 +782,7 @@ async def add_child_workitem(
         filed_against=filed_against,
         custom_fields=custom_fields,
         if_exists=if_exists,
+        verbose=verbose,
     )
 
 
@@ -777,7 +813,8 @@ async def add_comment(id: str, text: str) -> dict:
         id: Work item ID (number)
         text: Comment text
 
-    Returns the new comment {"id", "author", "created", "text"}. If the server accepts the POST but
+    Returns the new comment {"id", "author", "created", "text", "html"}: `html` is the body as the server stores
+    it (escaped, line breaks as <br/>), `text` the readable one (what was sent). If the server accepts the POST but
     the comment does not appear, the call fails WITHOUT resending it (check the item before retrying).
     """
     return await oslc.add_comment(id, text)
@@ -785,7 +822,11 @@ async def add_comment(id: str, text: str) -> dict:
 
 @read_tool
 async def list_comments(id: str) -> list[dict]:
-    """List the comments of a work item: [{"id", "author", "created", "text"}] in thread order."""
+    """List the comments of a work item in thread order: [{"id", "author", "created", "text", "html"}].
+
+    `html` is the body as the server stores it; `text` the readable one (<br> as newline, other tags removed,
+    entities decoded, trimmed).
+    """
     return await oslc.list_comments(id)
 
 

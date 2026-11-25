@@ -54,6 +54,12 @@
           "type": "null|object",
           "required": false,
           "default": null
+        },
+        {
+          "name": "verbose",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -206,6 +212,12 @@
           "type": "string",
           "required": false,
           "default": "error"
+        },
+        {
+          "name": "verbose",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     },
@@ -929,6 +941,12 @@
           "type": "null|object",
           "required": false,
           "default": null
+        },
+        {
+          "name": "verbose",
+          "type": "boolean",
+          "required": false,
+          "default": false
         }
       ]
     }

@@ -2489,6 +2489,7 @@ _COMMENT_CONTENT_TYPE = "application/x-oslc-cm-change-request+json"
 # (only the English title was seen in the RED fixtures).
 _UNASSIGNED_RE = _re.compile(r"^\s*(unassigned|n[aã]o\s+(atribu[ií]do|designado))\s*$", _re.IGNORECASE)
 _WORKFLOW_STATE_RE = _re.compile(r"/oslc/workflows/([^/]+)/states/([^/]+)/([^/?#]+)/?$")
+_ITEM_URL_RE = _re.compile(r"/com\.ibm\.team\.workitem\.WorkItem/[^/?#]+/?$")
 _WORKITEM_ID_RE = _re.compile(r"/(?:com\.ibm\.team\.workitem\.WorkItem|oslc/workitems)/([^/?#]+)/?$")
 
 
@@ -2507,6 +2508,58 @@ def _workitem_key(uri: str) -> str:
     """Work item id of either URL form (itemName/... or oslc/workitems/...); the URI itself otherwise."""
     m = _WORKITEM_ID_RE.search(uri or "")
     return m.group(1) if m else uri
+
+
+def _item_uri(ident, about) -> str | None:
+    """The canonical item URL: ``rdf:about`` when it already is one, else derived from the id (None without id).
+
+    A POST answers with the creation factory as ``rdf:about``, which is not the item.
+    """
+    if isinstance(about, str) and _ITEM_URL_RE.search(about):
+        return about
+    return workitem_uri(str(ident)) if ident is not None else None
+
+
+async def fill_compact(summary: dict) -> dict:
+    """Fill a missing ``type``/``state`` of a duplicate-path summary with ONE tolerant read of the item.
+
+    Never raises: the work item exists already, so a failed read just leaves the keys None.
+    """
+    if summary.get("id") is None or (summary.get("type") is not None and summary.get("state") is not None):
+        return summary
+    try:
+        item, _ = await _read_item(await get_client(), workitem_uri(summary["id"]), "read")
+    except Exception:  # noqa: BLE001 - the creation already happened: never fail here
+        return summary
+    filled = compact_workitem({**item, "dcterms:identifier": summary["id"]}, "created")
+    for key in ("type", "state"):
+        if summary.get(key) is None:
+            summary[key] = filled[key]
+    return summary
+
+
+def compact_workitem(item: dict, flag: str) -> dict:
+    """The short result of a work item write: {id, uri, title, type, state, <flag>} (+ ``warning`` when present).
+
+    ``flag`` is ``created`` or ``updated``. A missing key gives None. ``type``/``state`` come from
+    ``dcterms:type``/``oslc_cm:status``, or from ``type``/``status`` of a list_workitems-style row.
+    """
+
+    def pick(*keys: str):
+        return next((item[k] for k in keys if item.get(k) is not None), None)
+
+    ident = pick("dcterms:identifier")
+    result = {
+        "id": str(ident) if ident is not None else None,
+        "uri": _item_uri(ident, pick("rdf:about")),
+        "title": pick("dcterms:title"),
+        "type": pick("dcterms:type", "type"),
+        "state": pick("oslc_cm:status", "status"),
+        flag: item.get(flag, True),
+    }
+    if "warning" in item:
+        result["warning"] = item["warning"]
+    return result
 
 
 def _resource_uri(value) -> str | None:
@@ -2555,8 +2608,35 @@ def comments_uri(id: str) -> str:
     return f"{settings.elm_url}/ccm/oslc/workitems/{_quote_segment(id)}/rtc_cm:comments"
 
 
+_BR_TAG = _re.compile(r"<br[ \t\r\n\f\v]*/?>", _re.IGNORECASE)  # linear: the whitespace and the slash are disjoint
+
+
+# Block tags end a line. Only the tag NAME is matched (a fixed alternation followed by one lookahead character),
+# so the scan is linear on server text; the rest of the tag is left to ``xmlscan.strip_tags``.
+_BLOCK_END = _re.compile(r"</(?:div|p|li|tr|h[1-6]|ul|ol|table)(?=[ \t\r\n\f\v>/])", _re.IGNORECASE)
+_LI_START = _re.compile(r"<li(?=[ \t\r\n\f\v>/])", _re.IGNORECASE)
+_BLANK_RUN = _re.compile(r"\n{3,}")
+
+
+def readable_comment(html: str | None) -> str | None:
+    """Readable text of a stored comment body: <br> and block tags (div, p, li, tr, h1-h6, ul, ol, table) become
+    line breaks, other tags go, entities are decoded, line endings are LF and blank runs are at most one line.
+
+    Linear time on server text (``xmlscan.strip_tags``; no ambiguous regex, see docs/audit/regex-audit-2026-11-25.md).
+    """
+    if html is None:
+        return None
+    spaced = _LI_START.sub(
+        lambda m: "\n" + m.group(0), _BLOCK_END.sub(lambda m: "\n" + m.group(0), _BR_TAG.sub("\n", html))
+    )
+    text = _html.unescape(xmlscan.strip_tags(spaced)).replace("\r\n", "\n").replace("\r", "\n")
+    return _BLANK_RUN.sub("\n\n", text).strip()
+
+
 async def _comment_entry(client: httpx.AsyncClient, member) -> dict:
-    """{id, author, created, text} of one oslc:comment member (inline, or a reference that is read).
+    """{id, author, created, text, html} of one oslc:comment member (inline, or a reference that is read).
+
+    ``html`` is the body as the server stores it, ``text`` the readable one (see ``readable_comment``).
 
     The body of an individual comment (dcterms:identifier/creator/created/description) is to be
     confirmed in live acceptance.
@@ -2564,18 +2644,20 @@ async def _comment_entry(client: httpx.AsyncClient, member) -> dict:
     if isinstance(member, str):
         member = {"rdf:resource": member}
     if not isinstance(member, dict):
-        return {"id": None, "author": None, "created": None, "text": None}
+        return {"id": None, "author": None, "created": None, "text": None, "html": None}
     if set(member) <= {"rdf:resource"} and member.get("rdf:resource"):
         resp = await fetch(client, "GET", member["rdf:resource"], "list_comments", headers=_JSON_HEADERS)
         member = {**resp.json(), "rdf:about": member["rdf:resource"]}
     about = member.get("rdf:about") or member.get("rdf:resource") or ""
     ident = member.get("dcterms:identifier")
     creator = member.get("dcterms:creator")
+    html = member.get("dcterms:description")
     return {
         "id": str(ident) if ident is not None else (_last_segment(about) if about else None),
         "author": _resource_uri(creator) or (creator if isinstance(creator, str) else None),
         "created": member.get("dcterms:created"),
-        "text": member.get("dcterms:description"),
+        "text": readable_comment(html) if isinstance(html, str) else html,
+        "html": html,
     }
 
 
@@ -2643,9 +2725,9 @@ async def add_comment(id: str, text: str) -> dict:
     if created_id is not None:
         new = [c for c in fresh if c["id"] == created_id]
     if not new:
-        new = [c for c in fresh if _plain(c["text"]) == wanted]
+        new = [c for c in fresh if _plain(c["html"]) == wanted]
     if not new:
-        new = [c for c in anonymous if _plain(c["text"]) == wanted]
+        new = [c for c in anonymous if _plain(c["html"]) == wanted]
     if not new:
         raise ValueError(
             f"The server answered HTTP {resp.status_code} to the comment POST on work item {id}, but the "
@@ -3263,6 +3345,7 @@ async def find_workitem_duplicates(project: str, title: str, type_id: str, paren
                 "rdf:about": item.get("rdf:about", ""),
                 "dcterms:identifier": item.get("dcterms:identifier"),
                 "dcterms:title": item.get("dcterms:title"),
+                "dcterms:type": item.get("dcterms:type"),
             }
         )
     return found

@@ -68,7 +68,7 @@ async def test_create_workitem_accepts_any_type_the_project_exposes(w2_router, t
     mock_ccm(w2_router)
     posts = mock_creation(w2_router)
     result = await server.create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     _only_post_to(posts, type_id)
     assert f"/types/{PA}/{type_id}" in _posted_body(posts, type_id)
 

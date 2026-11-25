@@ -220,7 +220,7 @@ async def test_add_child_sends_the_parent_custom_fields_and_filed_against(w2_rou
         custom_fields={f"rtc_ext:{CAT_PROP}": "Infra"},
         if_exists="create",
     )
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert posts["task"].call_count == 1
     body = w4.posted(posts["task"])
     fields = _by_local(body)
@@ -281,7 +281,7 @@ async def test_add_child_workitem_contract_gains_only_filed_against_and_custom_f
     params = actual["add_child_workitem"]["parameters"]
     names = [p["name"] for p in params]
     assert names[: len(OLD_ADD_CHILD)] == OLD_ADD_CHILD
-    assert sorted(names[len(OLD_ADD_CHILD) :]) == ["custom_fields", "filed_against"]
+    assert sorted(names[len(OLD_ADD_CHILD) :]) == ["custom_fields", "filed_against", "verbose"]
     create = {p["name"]: p for p in actual["create_workitem"]["parameters"]}
     new = {p["name"]: p for p in params}
     for name in ("filed_against", "custom_fields"):

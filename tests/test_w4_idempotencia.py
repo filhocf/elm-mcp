@@ -228,7 +228,7 @@ async def test_wi_without_duplicate_creates_and_says_so(w2_router):
     posts, _ = _ccm_env(w2_router, [w4.ccm_row(5, "Another title")])
     result = await _create_wi()
     assert result["created"] is True
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert posts["task"].call_count == 1
 
 

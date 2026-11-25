@@ -375,7 +375,7 @@ async def test_validation_error_invalidates_rediscovers_once_and_retries_once(w2
     posts, services_before = await _primed_create_env(w2_router)
     posts["task"].side_effect = [_validation_error(status), httpx.Response(201, json=w2.CREATED)]
     result = await server.create_workitem(project=PROJECT, title="T", type="task")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert posts["task"].call_count == 2
     assert calls_to(w2_router, SERVICES) == services_before + 1, "exactly one rediscovery of the project area"
 
@@ -419,5 +419,5 @@ async def test_profile_defaults_are_the_fallback_when_the_shape_cannot_be_discov
     posts = w4.mock_create_env(w2_router, shape_status=500)
     w4.FakeCcmQuery(w2_router, [])
     result = await server.create_workitem(project=PROJECT, title="T", type="task")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert f.CAT_2 in w4.posted(posts["task"])
