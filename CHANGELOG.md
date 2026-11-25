@@ -24,6 +24,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 | 7 | **`create_workitem` no longer picks a category** and refuses, before any write, required fields that nothing fills | Pass `filed_against`/`custom_fields`, or set `defaults` in the local profile |
 | 8 | **`download_attachment` is no longer flagged read only** (it writes a local file) | Clients that auto-approve read-only tools will now ask |
 
+### Acknowledgements
+
+Thanks to Susane Schmidt for sharing her knowledge of the ALM usage processes.
+
 Details of each change follow.
 
 ### Changed
