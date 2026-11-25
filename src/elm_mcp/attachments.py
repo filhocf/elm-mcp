@@ -27,7 +27,9 @@ DEFAULT_MAX_DOWNLOAD_MB = 50.0
 DEFAULT_DOWNLOAD_TIMEOUT = 300.0
 MAX_NAME_BYTES = 255
 _CHUNK = 64 * 1024
-_FILENAME_STAR = re.compile(r"filename\*\s*=\s*([^';]*)'[^';]*'([^;]*)", re.IGNORECASE)
+# Bounded runs (RFC 5987: charset and language are short): an unbounded ``[^';]*`` re-read the rest of the header from
+# every ``filename*=`` that has no quote after it (quadratic, #88).
+_FILENAME_STAR = re.compile(r"filename\*\s{0,64}=\s{0,64}([^';]{0,64})'[^';]{0,64}'([^;]*)", re.IGNORECASE)
 _FILENAME_PLAIN = re.compile(r'filename\s*=\s*(?:"([^"]*)"|([^;\s]*))', re.IGNORECASE)
 
 
