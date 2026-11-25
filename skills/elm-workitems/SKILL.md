@@ -165,7 +165,7 @@ create_workitem(
 )
 
 # Child task under a parent (build hierarchy)
-add_child_workitem(parent_id="100300", title="Write login form", type="task")
+add_child_workitem(parent_id="100300", title="Write login form", project="MY PROJECT (KEY)", type="task")
 
 # --- Update ---
 update_workitem(id="100300", owner="jdoe", estimate_hours=16)

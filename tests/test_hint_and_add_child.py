@@ -292,3 +292,90 @@ async def test_add_child_workitem_contract_gains_only_filed_against_and_custom_f
     assert {n: t for n, t in snapshot.items() if n != "add_child_workitem"} == {
         n: t for n, t in actual.items() if n != "add_child_workitem"
     }
+
+
+# ======================================================================
+# ReDoS guard: hostile server messages must not stall the event loop (limit 5 s; CI with coverage is ~10x slower)
+# ======================================================================
+_ONE_MB = 1_000_000
+_LEGIT = "The 'Categoria' attribute needs to be set"
+_HOSTILE = {
+    "single_quote_open": lambda: "The '" * (_ONE_MB // 5),
+    "double_quote_open": lambda: 'The "' * (_ONE_MB // 5),
+    "only_quotes": lambda: "'" * _ONE_MB,
+    "the_spaces": lambda: "The  " * (_ONE_MB // 5),
+}
+
+
+def _fake_shape(monkeypatch):
+    from elm_mcp import oslc
+
+    async def fake_props(shape_uri):
+        return [{"title": "Categoria", "name": "categoriatarefa", "property_uri": None, "allowed_values_uri": None}]
+
+    monkeypatch.setattr(oslc, "list_shape_properties", fake_props)
+    return oslc
+
+
+@pytest.mark.parametrize("kind", sorted(_HOSTILE))
+async def test_required_attribute_hint_is_fast_on_hostile_messages(monkeypatch, kind):
+    import time
+
+    oslc = _fake_shape(monkeypatch)
+    start = time.perf_counter()
+    hint = await oslc._required_attribute_hint(_HOSTILE[kind](), "https://x/shape")
+    assert time.perf_counter() - start < 5
+    assert hint is None
+
+
+@pytest.mark.parametrize("kind", sorted(_HOSTILE))
+async def test_required_attribute_hint_finds_a_legit_message_after_garbage_within_the_limit(monkeypatch, kind):
+    import time
+
+    oslc = _fake_shape(monkeypatch)
+    message = _HOSTILE[kind]()[:900] + " " + _LEGIT
+    start = time.perf_counter()
+    hint = await oslc._required_attribute_hint(message, "https://x/shape")
+    assert time.perf_counter() - start < 5
+    assert hint is not None and "categoriatarefa" in hint
+
+
+async def test_required_attribute_hint_ignores_a_legit_message_buried_beyond_the_limit(monkeypatch):
+    oslc = _fake_shape(monkeypatch)
+    assert await oslc._required_attribute_hint("x" * 100_000 + _LEGIT, "https://x/shape") is None
+
+
+async def test_required_attribute_hint_uses_at_most_five_titles(monkeypatch):
+    from elm_mcp import oslc
+
+    seen = []
+
+    async def fake_props(shape_uri):
+        return [
+            {"title": f"F{i}", "name": f"n{i}", "property_uri": None, "allowed_values_uri": None} for i in range(20)
+        ]
+
+    monkeypatch.setattr(oslc, "list_shape_properties", fake_props)
+    message = ". ".join(f"The 'F{i}' attribute needs to be set" for i in range(20))
+    hint = await oslc._required_attribute_hint(message, "https://x/shape")
+    seen = [i for i in range(20) if f"n{i}" in hint]
+    assert seen == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.parametrize("body", ["<message " * 125_000, "<a:message " * 90_000, "<message>" * 100_000])
+def test_server_message_is_fast_on_hostile_xml(body):
+    import time
+
+    from elm_mcp import oslc
+
+    resp = httpx.Response(403, text=body)
+    start = time.perf_counter()
+    oslc._server_message(resp)
+    assert time.perf_counter() - start < 5
+
+
+def test_server_message_still_reads_a_normal_xml_message():
+    from elm_mcp import oslc
+
+    resp = httpx.Response(403, text="<oslc:Error><oslc:message>No way</oslc:message></oslc:Error>")
+    assert oslc._server_message(resp) == "No way"

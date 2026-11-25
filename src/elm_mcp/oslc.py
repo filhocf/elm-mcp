@@ -56,6 +56,10 @@ QUERY_RESOURCE_TYPE = {
 }
 
 
+# Bounded quantifiers: an unbounded [^>]* rescans to the end of the body from every "<message" (quadratic).
+_MESSAGE_XML = _re.compile(r"<\w{0,32}:?message\b[^>]{0,500}>([^<]+)</\w{0,32}:?message>")
+
+
 def _server_message(resp: httpx.Response) -> str | None:
     """Extract the server's oslc:message (JSON, or XML as a fallback) from an error response."""
     try:
@@ -68,7 +72,7 @@ def _server_message(resp: httpx.Response) -> str | None:
         text = resp.text or ""
     except ValueError:
         return None
-    m = _re.search(r"<\w*:?message\b[^>]*>([^<]+)</\w*:?message>", text)
+    m = _MESSAGE_XML.search(text)
     return m.group(1).strip() if m else None
 
 
@@ -830,7 +834,12 @@ def _raise_write_error(resp: httpx.Response, operation: str, uri: str, hint: str
     raise WriteRejected(message, resp.status_code)
 
 
-_NEEDS_TO_BE_SET = _re.compile(r"""The\s+(['"])(.+?)\1\s+attribute needs to be set""")
+# No ambiguous backtracking: the title is a bounded run of non-quote chars, one alternative per quote kind.
+_NEEDS_TO_BE_SET = _re.compile(
+    r"""The\s{1,20}(?:'([^'\n]{1,200})'|"([^"\n]{1,200})")\s{1,20}attribute needs to be set"""
+)
+_NEEDS_SCAN_CHARS = 2000
+_NEEDS_MAX_TITLES = 5
 
 
 async def _required_attribute_hint(server_message: str | None, shape_uri: str | None) -> str | None:
@@ -842,7 +851,13 @@ async def _required_attribute_hint(server_message: str | None, shape_uri: str | 
     """
     if not server_message or not shape_uri:
         return None
-    titles = [m.group(2).strip() for m in _NEEDS_TO_BE_SET.finditer(server_message)]
+    titles: list[str] = []
+    for m in _NEEDS_TO_BE_SET.finditer(server_message[:_NEEDS_SCAN_CHARS]):
+        title = (m.group(1) or m.group(2)).strip()
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) >= _NEEDS_MAX_TITLES:
+            break
     if not titles:
         return None
     try:

@@ -144,7 +144,7 @@ create_workitem(
 )
 
 # Child task (under a parent work item)
-add_child_workitem(parent_id="628430", title="Sub-task", type="task")
+add_child_workitem(parent_id="628430", title="Sub-task", project="MY PROJECT (KEY)", type="task")
 ```
 
 > Project-specific attributes (category, iteration, custom `rtc_ext:*` fields) vary per
