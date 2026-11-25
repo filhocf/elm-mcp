@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+41 tools (22 read-only, 19 that write). Everything accumulated since 0.5.0, verified in a live acceptance of the writes against a real ELM 7.0.1 SR1 on 24/nov/2026 (disposable items, all cleaned up).
+
+**Highlights:** CCM collaboration (comments, links between work items, `set_field`, workflow actions by id), QM (ETM) reading and writing (test cases, plans, suites, scripts, links, coverage, results), cross-domain links from work items (`link_artifacts`), hours and attachments (read only), `list_teams`, Markdown input and an idempotent XHTML root for requirements, enumeration labels in `list_fields` and `set_field`, a local JSON profile, a discovery cache, `if_exists` idempotency on every creation, diagnostic errors that name the gate that blocked the call, and skills for discovery, requirements, work items, QM and traceability.
+
+### Breaking changes (read before upgrading)
+
+| # | What changed | How to migrate |
+|---|---|---|
+| 1 | **TLS verification is ON by default** (it was always off) (#71) | Internal CA: `ELM_CA_BUNDLE=/path/ca.pem` (or `system`). Last resort: `ELM_VERIFY_TLS=false` |
+| 2 | **Password decoding no longer guesses** (#70): `ELM_PASSWORD` is used as typed; a plaintext password in `~/.elm_creds.json` is an error | Base64 in the env var needs the `b64:` prefix; run `elm-mcp login` again |
+| 3 | **`create_workitem`, `update_workitem`, `add_child_workitem` return a short summary** (#81); `list_comments`/`add_comment` return `text` (plain) and `html` (stored) | `r["dcterms:identifier"]` becomes `r["id"]`; `verbose=True` gives the full item |
+| 4 | **`if_exists` defaults to `error`**: creating a requirement, work item or QM resource whose title/type/parent already exists is refused | Pass `if_exists="create"` for the old behavior, or `"return"` to get the existing one |
+| 5 | **`create_requirement` requires `type`** (a shape URI or a type title from `list_types`) | Pass `type=...` |
+| 6 | **`list_workitems`, `search_requirements`, `search_testcases` return `{"items": [...], "truncated": bool}`** instead of a list | Read `["items"]` |
+| 7 | **`create_workitem` no longer picks a category** and refuses, before any write, required fields that nothing fills | Pass `filed_against`/`custom_fields`, or set `defaults` in the local profile |
+| 8 | **`download_attachment` is no longer flagged read only** (it writes a local file) | Clients that auto-approve read-only tools will now ask |
+
+Details of each change follow.
+
 ### Changed
 
 - **BREAKING (#81): `create_workitem`, `update_workitem` and `add_child_workitem` return a short summary by default; `list_comments` and `add_comment` return a different comment shape.** Before, these tools returned the whole work item as the server sent it: a real item had 125 keys, about 21 KB, and the caller only needed the id. Now (release 0.6.0):

@@ -2,8 +2,8 @@
 
 ## Estado Atual (nov/2026)
 
-- **Versão**: 0.4.0 publicada; onda W2 (colaboração CCM, v0.6.0) em desenvolvimento na branch `feat/w2-colaboracao`, ainda sem release
-- **Tools**: 25 (14 de leitura, 11 de escrita); lista completa e assinaturas em `docs/TOOLS.md`
+- **Versão**: 0.6.0 (em `main`, 25/nov/2026); a última publicada no PyPI é a 0.5.0 até o Claudio autorizar a tag `v0.6.0` (empurrar a tag publica no PyPI, sem aprovação intermediária)
+- **Tools**: 41 (22 de leitura, 19 que não são somente leitura); lista completa e assinaturas em `docs/TOOLS.md`
 - **Repo**: https://github.com/filhocf/elm-mcp
 - **Status**: ✅ Testado end-to-end contra ELM real
 
