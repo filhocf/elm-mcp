@@ -65,7 +65,11 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    for the shape and required fields; `inspect_workitem(id)` to copy concrete values
    (category, iteration, custom attributes) from a real item.
 6. **Create.** `create_workitem(project, title, type="task", description=None,
-   parent_id=None, owner=None, filed_against=None, custom_fields=None, if_exists="error")`.
+   parent_id=None, owner=None, filed_against=None, custom_fields=None, if_exists="error", verbose=False)`.
+   It returns a short summary `{"id", "uri", "title", "type", "state", "created"}` (`id` is a string;
+   a key the server did not give is `None`; `warning` is added when the item was found after the server
+   refused the request); `verbose=True` returns the whole item (about 125 keys) plus `created`. With
+   `if_exists="return"` the existing item has `created: false`; `type` comes from the duplicate check and `state` from one tolerant extra read of the item (both `None` if that read fails; same fill when the item shows up with a `warning`). `uri` is always the canonical item URL.
    `type` is any work item type of the project (id, title or alias from `list_types`; an ambiguous
    one is refused listing the ids).
    - **The tool never picks a category.** If `filed_against` is omitted it is not sent and the server
@@ -86,15 +90,16 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
      live for it (by reading the code it would send a plain string, so prefer `custom_fields`).
    Pass `parent_id` to create it already linked under a parent.
 7. **Child item.** `add_child_workitem(parent_id, title, project, type="task", description=None,
-   owner=None, if_exists="error", filed_against=None, custom_fields=None)` creates a work item
+   owner=None, if_exists="error", filed_against=None, custom_fields=None, verbose=False)` creates a work item
    linked as a child of `parent_id` (`filed_against`, `custom_fields` and `if_exists` as in
-   `create_workitem`) — use this to build a backlog hierarchy under a story/epic.
+   `create_workitem`; it returns the same summary) — use this to build a backlog hierarchy under a story/epic.
 
 ### Collaboration
 
-- `list_comments(id)` -> `[{"id", "author", "created", "text"}]`; `add_comment(id, text)` sends
+- `list_comments(id)` -> `[{"id", "author", "created", "text", "html"}]` (`html` is the body as the server stores it, `text`
+  the readable PLAIN TEXT: `<br>` and block tags as newlines, other tags removed, entities decoded; never treat it as HTML, and links/images lose their `href`/`src` there, `html` keeps them); `add_comment(id, text)` sends
   the text HTML-escaped (line breaks as `<br/>`), POSTs once (never resent) and confirms the new
-  comment by its id.
+  comment by its id. It returns that comment in the same shape.
 - `link_workitems(source, target, link_type)` / `unlink_workitems(...)`: work item to work item;
   `link_type` is `parent` (replaces the current parent), `blocks`, `depends_on`, `related`,
   `duplicate_of` or `resolves`; an item cannot be linked to itself. Confirmed by re-reading.
@@ -121,7 +126,8 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
 ### Update & transition
 
 8. **Update fields.** `update_workitem(id, title=None, description=None, owner=None,
-   estimate_hours=None, planned_for=None, custom_fields=None)` — partial PUT with `If-Match`;
+   estimate_hours=None, planned_for=None, custom_fields=None, verbose=False)` — partial PUT with `If-Match`; returns
+   `{"id", "uri", "title", "type", "state", "updated": true}` (the whole re-read item with `verbose=True`);
    pass only the fields you want to change (only those are sent). A stale ETag is a conflict error. Use `planned_for` (an iteration URI) to plan into a sprint.
 9. **Change state.** `transition_workitem(id, action)` where `action` is the id (or id suffix,
    e.g. `a27`) of a workflow action of the item's workflow. A unique case-insensitive substring
@@ -149,6 +155,8 @@ list_iterations(project="MY PROJECT (KEY)")
 # --- Create ---
 # Minimal (category + iteration auto-discovered)
 create_workitem(project="MY PROJECT (KEY)", title="Implement login", type="task")
+# -> {"id": "100301", "uri": "https://elm.company.com/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/100301",
+#     "title": "Implement login", "type": "Task", "state": "New", "created": True}
 
 # Story with explicit, DISCOVERED project-specific fields
 create_workitem(

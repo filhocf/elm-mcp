@@ -101,7 +101,7 @@ async def test_without_a_profile_a_filled_required_field_is_not_reported(w2_rout
 async def test_without_a_profile_custom_fields_can_fill_the_required_ones(w2_router):
     posts = _env(w2_router)
     result = await _create(filed_against=CAT_A, custom_fields={"rtc_cm:severity": _res(SEV)})
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert w4.post_total(posts) == 1
 
 

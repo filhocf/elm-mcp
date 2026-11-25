@@ -128,6 +128,9 @@ Limits and cautions for `content`:
 ```python
 # Minimal (iteration auto-discovered; the server applies its default category)
 create_workitem(project="MY PROJECT (KEY)", title="My Task", type="task")
+# -> {"id": "629800", "uri": "https://elm.company.com/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/629800",
+#     "title": "My Task", "type": "Task", "state": "New", "created": True}
+# verbose=True returns the whole work item as the server sent it (about 125 keys), plus "created"
 
 # With explicit fields (project-specific attributes)
 create_workitem(
@@ -145,6 +148,7 @@ create_workitem(
 
 # Child task (under a parent work item)
 add_child_workitem(parent_id="628430", title="Sub-task", project="MY PROJECT (KEY)", type="task")
+# -> same summary as create_workitem (verbose=True for the whole item)
 ```
 
 > Project-specific attributes (category, iteration, custom `rtc_ext:*` fields) vary per
@@ -156,6 +160,8 @@ add_child_workitem(parent_id="628430", title="Sub-task", project="MY PROJECT (KE
 ```python
 # Set owner + estimate
 update_workitem(id="629772", owner="jdoe", estimate_hours=16)
+# -> {"id": "629772", "uri": "...", "title": "...", "type": "Task", "state": "In Progress", "updated": True}
+# verbose=True returns the whole re-read work item
 
 # Set iteration
 update_workitem(id="629772", planned_for="https://elm.company.com/ccm/oslc/iterations/_ITERATION_OID")

@@ -425,7 +425,7 @@ async def test_d9_create_workitem_posts_to_the_type_factory(type_arg):
     type_id = {"task": "task", "story": STORY_ID}[type_arg]
     _, typed, generic = _setup_create(type_id)
     result = await create_workitem(project=PROJECT, title="T", type=type_arg, if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert typed.call_count == 1
     assert generic.call_count == 0
     request = typed.calls[0].request
@@ -483,7 +483,7 @@ async def test_d9_401_reauthenticates_once_and_resends_to_the_type_factory():
     auth, typed, generic = _setup_create()
     typed.mock(side_effect=[httpx.Response(401, text="Unauthorized"), httpx.Response(201, json=CREATED)])
     result = await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert typed.call_count == 2
     assert generic.call_count == 0
     assert auth.call_count == 2  # initial login + one re-authentication
@@ -831,7 +831,7 @@ async def test_g5l2_create_403_without_oslc_message_reauthenticates_and_resends_
     auth, typed, _ = _setup_create()
     typed.mock(side_effect=[httpx.Response(403, text="Forbidden"), httpx.Response(201, json=CREATED)])
     result = await create_workitem(project=PROJECT, title="T", type="task", if_exists="create")
-    assert result["dcterms:identifier"] == "42"
+    assert result["id"] == "42"
     assert typed.call_count == 2
     assert auth.call_count == 2
 
