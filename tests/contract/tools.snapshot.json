@@ -42,6 +42,18 @@
           "type": "string",
           "required": false,
           "default": "error"
+        },
+        {
+          "name": "filed_against",
+          "type": "null|string",
+          "required": false,
+          "default": null
+        },
+        {
+          "name": "custom_fields",
+          "type": "null|object",
+          "required": false,
+          "default": null
         }
       ]
     },

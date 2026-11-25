@@ -56,6 +56,11 @@ QUERY_RESOURCE_TYPE = {
 }
 
 
+# Bounded quantifiers: an unbounded [^>]* rescans to the end of the body from every "<message" (quadratic).
+# 2000 keeps messages with long attribute lists readable (the old [^>]* read them) and stays linear.
+_MESSAGE_XML = _re.compile(r"<\w{0,32}:?message\b[^>]{0,2000}>([^<]+)</\w{0,32}:?message>")
+
+
 def _server_message(resp: httpx.Response) -> str | None:
     """Extract the server's oslc:message (JSON, or XML as a fallback) from an error response."""
     try:
@@ -68,7 +73,7 @@ def _server_message(resp: httpx.Response) -> str | None:
         text = resp.text or ""
     except ValueError:
         return None
-    m = _re.search(r"<\w*:?message\b[^>]*>([^<]+)</\w*:?message>", text)
+    m = _MESSAGE_XML.search(text)
     return m.group(1).strip() if m else None
 
 
@@ -816,7 +821,7 @@ class WriteRejected(ValueError):
         self.status_code = status_code
 
 
-def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
+def _raise_write_error(resp: httpx.Response, operation: str, uri: str, hint: str | None = None) -> None:
     """Raise a readable ValueError naming the gate for a refused write.
 
     The @tool boundary only translates ValueError/RuntimeError, so the diagnosis must leave
@@ -824,9 +829,61 @@ def _raise_write_error(resp: httpx.Response, operation: str, uri: str) -> None:
     """
     message = diagnose_http_error(resp, operation, uri)
     server_message = _server_message(resp)
-    if server_message and _re.search(r"filed\s*against|categor", server_message, _re.IGNORECASE):
+    if hint:
+        message += f" {hint}"
+    elif server_message and _re.search(r"filed\s*against|categor", server_message, _re.IGNORECASE):
         message += " Hint: use list_fields to see the valid values (property filedAgainst, allowedValues)."
     raise WriteRejected(message, resp.status_code)
+
+
+# No ambiguous backtracking: the title is a bounded run of non-quote chars, one alternative per quote kind.
+_NEEDS_TO_BE_SET = _re.compile(
+    r"""The\s{1,20}(?:'([^'\n]{1,200})'|"([^"\n]{1,200})")\s{1,20}attribute needs to be set"""
+)
+_NEEDS_SCAN_CHARS = 2000
+_NEEDS_MAX_TITLES = 5
+
+
+async def _required_attribute_hint(server_message: str | None, shape_uri: str | None) -> str | None:
+    """Hint naming the shape field(s) the server says "needs to be set", or None (generic hint applies).
+
+    The quoted titles of ``The 'X' attribute needs to be set`` are DATA: they are only compared with the
+    shape property titles (exact, then casefold), never used as a pattern, and only the property names and
+    the allowed-value counts of the shape enter the hint. Any failure reading the shape means no hint here.
+    """
+    if not server_message or not shape_uri:
+        return None
+    titles: list[str] = []
+    for m in _NEEDS_TO_BE_SET.finditer(server_message[:_NEEDS_SCAN_CHARS]):
+        title = (m.group(1) or m.group(2)).strip()
+        if title and title not in titles:
+            titles.append(title)
+        if len(titles) >= _NEEDS_MAX_TITLES:
+            break
+    if not titles:
+        return None
+    try:
+        props = await list_shape_properties(shape_uri)
+    except (ValueError, httpx.HTTPError):
+        return None
+    found: list[dict] = []
+    for title in titles:
+        exact = [p for p in props if p["title"] == title]
+        matches = exact or [p for p in props if p["title"] and p["title"].casefold() == title.casefold()]
+        found.extend(p for p in matches if p not in found)
+    if not found:
+        return None
+    parts = []
+    for p in found:
+        name = p["name"] or _last_segment(p["property_uri"] or "") or p["title"]
+        count = None
+        if p["allowed_values_uri"]:
+            try:
+                count = len(await _allowed_values(p["allowed_values_uri"]))
+            except (ValueError, httpx.HTTPError):
+                count = None
+        parts.append(f"{name} ({count} allowed values)" if count is not None else str(name))
+    return f"Hint: use list_fields to see the valid values (property {', '.join(parts)})."
 
 
 def _resolve_ccm_type(factories: list[dict], type_arg: str) -> dict:
@@ -881,7 +938,8 @@ async def create_resource(
         creation_url = factory["factory_uri"]
     elif wi_type:
         factories = await _list_ccm_creation_factories(project_url)
-        creation_url = _resolve_ccm_type(factories, wi_type)["factory_uri"]
+        factory = _resolve_ccm_type(factories, wi_type)
+        creation_url = factory["factory_uri"]
     client = await get_client()
     rdfxml_body = _payload_to_rdfxml(payload)
     # Refresh session (prevents CSRF stale after idle); any authenticated GET works, keep the generic URL
@@ -900,7 +958,10 @@ async def create_resource(
     if resp.status_code != 201:
         if resp.is_success:
             raise RuntimeError(f"Expected 201 Created, got {resp.status_code}")
-        _raise_write_error(resp, "create_workitem", creation_url)
+        hint = None
+        if resp.status_code == 403 and factory is not None:
+            hint = await _required_attribute_hint(_server_message(resp), factory.get("shape_uri"))
+        _raise_write_error(resp, "create_workitem", creation_url, hint)
     return resp.json()
 
 
