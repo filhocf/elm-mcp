@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+- Custom attributes with accents (#84, e.g. `classificação`): the shape declares the property URI percent-encoded (`...classifica%C3%A7%C3%A3o`), the code kept the `%` and the server answered 409 "Unknown attribute"; the DECODED key is accepted (proved live against the server). `oslc._compact` and `canonical_property_key` now decode the local name once, only when the result is a plain name (unicode letters, digits, `.`, `_`, `-`; no `/`, `..`, space, control, markup, NUL, formatting/bidi characters or invalid UTF-8); double encoding (`%25`) is not decoded again. `set_field` accepts the decoded name, `prefix:decoded` and `prefix:encoded`; `create_workitem` and `update_workitem` normalize `custom_fields` keys (full URI, `prefix:encoded` or decoded). A property name that is still not a plain `prefix:name` (e.g. with `%`) is refused with a clear error by `create_workitem`, `update_workitem` and `set_field` instead of sending suspicious XML/JSON.
+
 ### Added
 
 - `list_fields` titles from the enumeration (#77) are hardened: path segments must match `[A-Za-z0-9_.-]+` (no `.`, `..`, `%`), URIs with userinfo are never fetched, the enumeration read is capped at 5 MB; `set_field` refuses an id that equals the label of another value as ambiguous (the full URI disambiguates).

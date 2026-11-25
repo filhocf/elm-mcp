@@ -784,6 +784,7 @@ def _payload_to_rdfxml(payload: dict) -> str:
     ns_decls = " ".join(f'xmlns:{p}="{u}"' for p, u in ns_map.items())
     elements = []
     for key, value in payload.items():
+        _check_property_key(key)
         if isinstance(value, dict) and "rdf:resource" in value:
             elements.append(f"  <{key} rdf:resource={quoteattr(str(value['rdf:resource']))}/>")
         elif isinstance(value, list):
@@ -909,6 +910,8 @@ async def update_resource(uri: str, payload: dict) -> dict:
     Sends ?oslc.properties=<changed props> and a body with just those properties, then
     returns the re-read resource.
     """
+    for key in payload:
+        _check_property_key(key)
     client = await get_client()
     # GET to obtain the ETag (and the prefix map, reused so custom prefixes resolve)
     get_resp = await fetch(
@@ -2770,9 +2773,42 @@ def _expand(name: str, prefixes: dict) -> str | None:
     return f"{ns}{local}" if ns else None
 
 
+_PLAIN_LOCAL_RE = _re.compile(r"[\w.-]+")
+_PROPERTY_KEY_RE = _re.compile(r"[A-Za-z_][\w.-]*:[^\W\d][\w.-]*")
+
+
+def _decode_local_name(local: str) -> str:
+    """Percent-decode a property local name ONCE, only when the result is a plain, safe name.
+
+    Shapes declare accented names percent-encoded (``classifica%C3%A7%C3%A3o``) but the server only accepts the
+    decoded key. The decoded name must be unicode letters, digits, ``_``, ``.`` or ``-`` (so no ``/``, space,
+    control, markup, NUL, formatting or bidi character), without ``..`` and valid UTF-8; otherwise (including
+    double encoding such as ``%25C3``, which decodes to a name with ``%``) the name is returned as it came.
+    """
+    if "%" not in local:
+        return local
+    try:
+        decoded = unquote(local, errors="strict")
+    except UnicodeDecodeError:
+        return local
+    if decoded == local or ".." in decoded or not _PLAIN_LOCAL_RE.fullmatch(decoded):
+        return local
+    return decoded
+
+
+def _check_property_key(key: str) -> str:
+    """The key itself when it is a prefixed name usable as an XML element and JSON key; ValueError otherwise."""
+    if not isinstance(key, str) or not _PROPERTY_KEY_RE.fullmatch(key):
+        raise ValueError(
+            f"Invalid property name {key!r}: use prefix:name with letters, digits, '.', '_' or '-' "
+            "(percent-encoded names are decoded only when the result is such a plain name)."
+        )
+    return key
+
+
 def _compact(uri: str, prefixes: dict) -> str | None:
     best = max(((p, ns) for p, ns in prefixes.items() if uri.startswith(ns)), key=lambda x: len(x[1]), default=None)
-    return f"{best[0]}:{uri[len(best[1]) :]}" if best else None
+    return f"{best[0]}:{_decode_local_name(uri[len(best[1]) :])}" if best else None
 
 
 def _match_literal(value: str, allowed: list[dict]) -> dict | None:
@@ -2797,7 +2833,7 @@ def _match_literal(value: str, allowed: list[dict]) -> dict | None:
 
 
 _FIELD_QNAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*:[\w.-]+$")
-_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][\w.-]*$")
+_FIELD_NAME_RE = _re.compile(r"^[^\W\d][\w.-]*$")
 _INTEGER_RANGES = {
     "integer": (None, None),
     "int": (None, None),
@@ -2864,6 +2900,9 @@ async def set_field(id: str, field: str, value: str) -> dict:
     field = (field or "").strip()
     if not field:
         raise ValueError("Field must not be empty.")
+    if ":" in field:  # prefix:encoded is accepted and used decoded (only when the decoded name is plain)
+        field_prefix, _, field_local = field.partition(":")
+        field = f"{field_prefix}:{_decode_local_name(field_local)}"
     if not (_FIELD_QNAME_RE.match(field) if ":" in field else _FIELD_NAME_RE.match(field)):
         raise ValueError(
             f"Invalid field name {field!r}: use prefix:name (e.g. rtc_cm:storyPoints) or a shape property name."
@@ -2883,6 +2922,8 @@ async def set_field(id: str, field: str, value: str) -> dict:
     props = await list_shape_properties(shape)
     expanded = _expand(field, prefixes)
     prop = next((p for p in props if expanded and p["property_uri"] == expanded), None)
+    if prop is None and ":" in field:  # the shape declares the URI percent-encoded; compare the decoded key
+        prop = next((p for p in props if _compact(p["property_uri"] or "", prefixes) == field), None)
     if prop is None:
         prop = next((p for p in props if p["name"] == field), None)
     if prop is None:
@@ -2896,6 +2937,7 @@ async def set_field(id: str, field: str, value: str) -> dict:
         key = _compact(prop["property_uri"] or "", prefixes) or ""
         if not key:
             raise ValueError(f"Cannot map shape property '{field}' ({prop['property_uri']}) to a prefixed name.")
+    _check_property_key(key)
     if prop["read_only"]:
         raise ValueError(f"Field '{key}' is read-only in this work item's shape and cannot be written.")
 
@@ -3175,7 +3217,8 @@ def canonical_property_key(key: str) -> str:
         text = namespace + local
     if text.startswith(("http://", "https://")):
         return _compact(text, _CCM_PREFIXES) or key
-    return text
+    prefix, sep, local = text.partition(":")
+    return f"{prefix}:{_decode_local_name(local)}" if sep else text
 
 
 async def missing_required_fields(factory: dict, payload: dict) -> list[str] | None:

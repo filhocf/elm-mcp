@@ -712,7 +712,7 @@ async def update_workitem(
     if planned_for is not None:
         payload["rtc_cm:plannedFor"] = {"rdf:resource": planned_for}
     if custom_fields:
-        payload.update(custom_fields)
+        payload.update({oslc.canonical_property_key(k): v for k, v in custom_fields.items()})
     if not payload:
         raise ToolError("At least one field must be provided")
     uri = f"{settings.elm_url}/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/{id}"
