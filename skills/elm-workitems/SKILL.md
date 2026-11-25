@@ -71,7 +71,7 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
    - **The tool never picks a category.** If `filed_against` is omitted it is not sent and the server
      applies its own default (often "Unassigned"), unless the local profile has a default for it
      (`defaults.<type id>`). If the server refuses the creation, the error carries its message, with a
-     `list_fields` hint when the refusal concerns the category; pass `filed_against` explicitly (a
+     `list_fields` hint when the refusal concerns the category (for `The 'X' attribute needs to be set` the hint names the field titled X and its number of allowed values); pass `filed_against` explicitly (a
      category URI from `list_fields` or `inspect_workitem`). The iteration is auto-discovered.
    - **Required fields.** Missing required fields are filled from the local profile
      (`defaults.<type id>`; your explicit arguments win); any the shape still
@@ -85,9 +85,10 @@ hardcoded — discover them first with the **`elm-discovery`** skill.
      validated live on 24/nov/2026 (the stored value equals the `uri` from `list_teams`); `set_field` was not tried
      live for it (by reading the code it would send a plain string, so prefer `custom_fields`).
    Pass `parent_id` to create it already linked under a parent.
-7. **Child item.** `add_child_workitem(parent_id, title, type="task", description=None,
-   owner=None, project=...)` creates a work item linked as a child of `parent_id` — use this
-   to build a backlog hierarchy under a story/epic.
+7. **Child item.** `add_child_workitem(parent_id, title, project, type="task", description=None,
+   owner=None, if_exists="error", filed_against=None, custom_fields=None)` creates a work item
+   linked as a child of `parent_id` (`filed_against`, `custom_fields` and `if_exists` as in
+   `create_workitem`) — use this to build a backlog hierarchy under a story/epic.
 
 ### Collaboration
 
@@ -164,7 +165,7 @@ create_workitem(
 )
 
 # Child task under a parent (build hierarchy)
-add_child_workitem(parent_id="100300", title="Write login form", type="task")
+add_child_workitem(parent_id="100300", title="Write login form", project="MY PROJECT (KEY)", type="task")
 
 # --- Update ---
 update_workitem(id="100300", owner="jdoe", estimate_hours=16)
