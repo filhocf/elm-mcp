@@ -728,11 +728,14 @@ async def add_child_workitem(
     description: str | None = None,
     owner: str | None = None,
     if_exists: str = "error",
+    filed_against: str | None = None,
+    custom_fields: dict | None = None,
 ) -> dict:
     """Create a child work item under a parent in an RTC project (same duplicate check as create_workitem).
 
     if_exists: "error" (default) refuses a work item of the same type, title and parent; "return" returns it
     with created=false; "create" creates anyway.
+    filed_against, custom_fields: passed to create_workitem unchanged (same meaning, see there).
     """
     return await create_workitem(
         project=project,
@@ -741,6 +744,8 @@ async def add_child_workitem(
         description=description,
         parent_id=parent_id,
         owner=owner,
+        filed_against=filed_against,
+        custom_fields=custom_fields,
         if_exists=if_exists,
     )
 
